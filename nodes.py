@@ -1,15 +1,15 @@
 import io
 import json
-# from os import walk
 from os.path import realpath, join
-from pprint import pprint
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (0,0,1),
+            "version": (0,0,1,0),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
 }
+__author__ = "noEmbryo"
+__version__ = "0.0.1.0"
 
 LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 
@@ -47,11 +47,12 @@ class PromptTermList:
         list_path = join(LISTS_PATH, "TermList{}.json".format(cls.idx))
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
-        return {"required": {"text": ("STRING", {"forceInput": True}),
+        return {"required": {
                              "term_list": (term_list,),
                              },
                 "optional":
-                    {"store_input": ("BOOLEAN", {"default": False,
+                    {"text": ("STRING", {"forceInput": True}),
+                     "store_input": ("BOOLEAN", {"default": False,
                                                  "label_on": True,
                                                  "label_off": False},),
                      },
@@ -93,7 +94,7 @@ class PromptTermList:
     CATEGORY = "conditioning/Term Nodes"
     FUNCTION = "run"
 
-    def run(self, text, term_list, store_input):
+    def run(self, term_list, store_input, text=None):
         selected = term_list[:len(term_list)]
         text_out = ""
         for i in self.data_labels:

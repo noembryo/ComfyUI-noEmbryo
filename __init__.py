@@ -4,11 +4,12 @@
 @nickname: noEmbryo
 @description: Some useful nodes.
 """
+
 import json
 import os, io
 from os.path import isfile, join, isdir
 
-from .terms_node import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, LISTS_PATH
+from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, LISTS_PATH
 
 os.makedirs(LISTS_PATH) if not isdir(LISTS_PATH) else None
 for i in range(len(NODE_CLASS_MAPPINGS)):
