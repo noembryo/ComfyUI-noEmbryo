@@ -7,7 +7,7 @@ from pprint import pprint
 MANIFEST = {"name": "noEmbryo Nodes",
             "version": (0,0,1),
             "author": "noEmbryo",
-            "project": "https://github.com/noembryo",
+            "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
 }
 
