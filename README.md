@@ -16,9 +16,9 @@
 
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
-  <a href="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen1.png">
+  <a href="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png">
     <!--suppress HtmlRequiredAltAttribute -->
-<img src="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen1.png" height="180"></a>
+<img src="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png" height="180"></a>
 </p>
 
 ## Usage
