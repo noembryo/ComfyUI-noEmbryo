@@ -24,8 +24,10 @@ There are two ways to add a new term.
 * From within ComfyUI:
   * Connect a text box to the node's `text` input.  
   * Write the "label"/"value" part in the box using the following format:  
-  label=Descriptive text  
-  value=masterpiece, artful and cozy  
+  ```
+  label=Descriptive text
+  value=masterpiece, artful and cozy
+  ```
   * Enable the `store_input` switch.  
   * Run a generation job.  
   * Refresh the page.  
@@ -35,7 +37,13 @@ There are two ways to add a new term.
   Of course we must be very careful with this, to keep the `json` format of labels/values (with the appropriate commas), otherwise the file will not be parsed.  
 
 This `text` input is also useful if we want to manually add something *after* our term, or as the *only* term if we select the `None` label of the dropdown.  
-The `strength` value is changing the impact of the term by using the parenthesis format like this: `(a great term:1.3)`
+The `strength` value is changing the impact of the term by using the parenthesis format like this: `(a great term:1.3)`  
+  
+We can delete a term by sending an empty value to the `text` input like this:
+```
+label=The label to be deleted
+value=
+```
 
 
 ## Installation
