@@ -74,6 +74,9 @@ class PromptTermList:
             return
         label = lines[0][6:]
         value = lines[1][6:]
+        if label == "None":
+            print(f'{self.name}: The label "{label}" cannot be changed!')
+            return
         if not value:
             del self.data[label]
         else:
