@@ -3,11 +3,11 @@ import json
 from os.path import realpath, join
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (0,0,1,0),
+            "version": (0, 0, 1, 0),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
-}
+            }
 __author__ = "noEmbryo"
 __version__ = "0.0.1.0"
 
@@ -46,6 +46,7 @@ class PromptTermList:
         list_path = join(LISTS_PATH, "TermList{}.json".format(cls.idx))
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
+        # 2do add strength slider
         return {"required": {
                              "term_list": (term_list,),
                              },
@@ -79,12 +80,13 @@ class PromptTermList:
             return
         if not value:
             del self.data[label]
+            print(f'{self.name}: The label "{label}" was deleted!')
         else:
-            self.data[label] = value
             if label in self.data:
                 print(f'{self.name}: The label "{label}" is updated!')
             else:
                 print(f'{self.name}: The label "{label}" is saved!')
+            self.data[label] = value
         with io.open(join(LISTS_PATH, "TermList{}.json".format(self.idx)),
                      mode="w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=4)
