@@ -46,12 +46,21 @@ class PromptTermList:
         list_path = join(LISTS_PATH, "TermList{}.json".format(cls.idx))
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
-        # 2do add strength slider
         return {"required": {
                              "term_list": (term_list,),
                              },
                 "optional":
                     {"text": ("STRING", {"forceInput": True}),
+                     "strength": ("FLOAT", {
+                         "default": 1.0,
+                         "min": 0.05,
+                         "max": 2.0,
+                         "step": 0.05,
+                         # The round value representing the precision to round to,
+                         # will be set to the step value by default.
+                         # Can be set to False to disable rounding.
+                         "round": 0.01,
+                         "display": "number"}),
                      "store_input": ("BOOLEAN", {"default": False,
                                                  "label_on": True,
                                                  "label_off": False},),
@@ -97,13 +106,15 @@ class PromptTermList:
     CATEGORY = "conditioning/Term Nodes"
     FUNCTION = "run"
 
-    def run(self, term_list, store_input, text=None):
+    def run(self, term_list, strength, store_input, text=None):
         selected = term_list[:len(term_list)]
         text_out = ""
         for i in self.data_labels:
             if i[0] == selected:
                 text_out = i[1]
                 break
+        if selected != "None" and strength != 1.0:
+            text_out = f"({text_out}:{strength})"
         if text:
             if store_input:
                 self.save_data_from_input(text)
