@@ -2,8 +2,8 @@
 <!-- ![kohighlights128w](https://user-images.githubusercontent.com/24675403/234561476-97283ff8-5437-49cd-b4c5-3929886cf182.png) -->
 
 [![made-with-python][Python]](https://www.python.org/)
-<!-- [![Generic badge][OS]][ReleaseLink] -->
 [![License: MIT][MIT]](LICENSE)
+<!-- [![Generic badge][OS]][ReleaseLink] -->
 <!-- [![GitHub release][Release]][ReleaseLink] -->
 <!-- [![Github all releases][TotalDown]][ReleaseLink] -->
 <!-- [![Github Releases (by Release)][VersionDown]][ReleaseLink] -->
@@ -14,13 +14,15 @@
 
 ### Screenshots
 
+<!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <a href="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen1.png">
-    <img src="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen1.png" height="180"></a>
+    <!--suppress HtmlRequiredAltAttribute -->
+<img src="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen1.png" height="180"></a>
 </p>
 
 ## Usage
-Everyone of the 6 nodes have a different `json` file that stores its Prompt Terms in "label"/"value" pairs.  
+Every one of the 6 nodes have a different `json` file that stores its Prompt Terms in "label"/"value" pairs.  
 The "label" part is what we see at the node's dropdown menu, and the "value" part is what it produces at its `Term` output when we run a generation job.  
   
 These `json` files are located inside the `TermLists` directory, in the node's folder.  
@@ -31,10 +33,11 @@ There are two ways to add a new term.
   value=blabla bla blabla blab  
   Enable the `store_input` switch.  
   Run a generation job.  
+  Refresh the page.  
 * Manually, open the `json` file and add/remove/change entries.  
   Of course we must be very careful with this, to keep the `json` format of labels/values (with the appropriate commas), otherwise the file will not be parsed.  
 
-This `text` input is also useful if we want to manually add something *after* our term, or as the *only* term if we select the `None` label.
+This `text` input is also useful if we want to manually add something *after* our term, or as the *only* term if we select the `None` label of the dropdown.
 
 
 ## Installation

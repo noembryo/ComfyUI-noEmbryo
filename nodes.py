@@ -35,7 +35,6 @@ class PromptTermList:
         """
         try:
             with io.open(json_file_path, mode="r", encoding="utf-8") as f:
-                # global data
                 cls.data = json.load(f)
                 cls.data_labels = list(cls.data.items())
         except FileNotFoundError:
@@ -64,7 +63,6 @@ class PromptTermList:
         :type text: str
         :param text: The text input
         """
-        # global data
         lines = text.splitlines()
         if not len(lines) > 1:
             self.has_error = True
@@ -149,7 +147,6 @@ NODE_CLASS_MAPPINGS = {"PromptTermList1": PromptTermList1,
                        "PromptTermList6": PromptTermList6
                        }
 
-# A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {"PromptTermList1": "PromptTermList 1",
                               "PromptTermList2": "PromptTermList 2",
                               "PromptTermList3": "PromptTermList 3",
