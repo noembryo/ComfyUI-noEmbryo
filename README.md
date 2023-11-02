@@ -1,25 +1,19 @@
 ## General
-<!-- ![kohighlights128w](https://user-images.githubusercontent.com/24675403/234561476-97283ff8-5437-49cd-b4c5-3929886cf182.png) -->
 
 [![made-with-python][Python]](https://www.python.org/)
 [![License: MIT][MIT]](LICENSE)
-<!-- [![Generic badge][OS]][ReleaseLink] -->
-<!-- [![GitHub release][Release]][ReleaseLink] -->
-<!-- [![Github all releases][TotalDown]][ReleaseLink] -->
-<!-- [![Github Releases (by Release)][VersionDown]][ReleaseLink] -->
-
 
 **PromptTermList** (1-6) are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
 
 ### Screenshots
 
-<!--suppress HtmlDeprecatedAttribute -->
-<p align="center">
+![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)
+
+<!-- <p align="center">
   <a href="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png">
-    <!--suppress HtmlRequiredAltAttribute -->
 <img src="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png" height="180"></a>
-</p>
+</p> -->
 
 ## Usage
 Every one of the 6 nodes have a different `json` file that stores its Prompt Terms in "label"/"value" pairs.  
