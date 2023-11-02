@@ -88,8 +88,12 @@ class PromptTermList:
             print(f'{self.name}: The label "{label}" cannot be changed!')
             return
         if not value:
-            del self.data[label]
-            print(f'{self.name}: The label "{label}" was deleted!')
+            if label in self.data:
+                del self.data[label]
+                print(f'{self.name}: The label "{label}" was deleted!')
+            else:
+                print(f'{self.name}: The label "{label}" does not exist!')
+            return
         else:
             if label in self.data:
                 print(f'{self.name}: The label "{label}" is updated!')
