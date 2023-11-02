@@ -47,7 +47,7 @@ class PromptTermList:
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
         return {"required": {
-                             "term_list": (term_list,),
+                             "terms": (term_list,),
                              },
                 "optional":
                     {"text": ("STRING", {"forceInput": True}),
@@ -106,8 +106,8 @@ class PromptTermList:
     CATEGORY = "conditioning/Term Nodes"
     FUNCTION = "run"
 
-    def run(self, term_list, strength, store_input, text=None):
-        selected = term_list[:len(term_list)]
+    def run(self, terms, strength, store_input, text=None):
+        selected = terms[:len(terms)]
         text_out = ""
         for i in self.data_labels:
             if i[0] == selected:
