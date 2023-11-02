@@ -27,17 +27,21 @@ The "label" part is what we see at the node's dropdown menu, and the "value" par
   
 These `json` files are located inside the `TermLists` directory, in the node's folder.  
 There are two ways to add a new term.  
-* From within ComfyUI, connect a text box to the node's `text` input.  
-  Write the "label"/"value" part in the box using the following format:  
-  label=bla blabla  
-  value=blabla bla blabla blab  
-  Enable the `store_input` switch.  
-  Run a generation job.  
-  Refresh the page.  
-* Manually, open the `json` file and add/remove/change entries.  
+* From within ComfyUI:
+  * Connect a text box to the node's `text` input.  
+  * Write the "label"/"value" part in the box using the following format:  
+  label=Descriptive text  
+  value=masterpiece, artful and cozy  
+  * Enable the `store_input` switch.  
+  * Run a generation job.  
+  * Refresh the page.  
+* Manually:
+  * Just open the `json` file and add/remove/change entries. 
+
   Of course we must be very careful with this, to keep the `json` format of labels/values (with the appropriate commas), otherwise the file will not be parsed.  
 
-This `text` input is also useful if we want to manually add something *after* our term, or as the *only* term if we select the `None` label of the dropdown.
+This `text` input is also useful if we want to manually add something *after* our term, or as the *only* term if we select the `None` label of the dropdown.  
+The `strength` value is changing the impact of the term by using the parenthesis format like this: `(a great term:1.3)`
 
 
 ## Installation
