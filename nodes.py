@@ -2,12 +2,9 @@ import io
 import json
 from os.path import realpath, join
 
-MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (0, 0, 1, 0),
-            "author": "noEmbryo",
+MANIFEST = {"name": "noEmbryo Nodes", "version": (0, 0, 1, 0), "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
-            "description": "Nodes for ComfyUI",
-            }
+            "description": "Nodes for ComfyUI", }
 __author__ = "noEmbryo"
 __version__ = "0.0.1.0"
 
@@ -46,25 +43,21 @@ class PromptTermList:
         list_path = join(LISTS_PATH, "TermList{}.json".format(cls.idx))
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
-        return {"required": {
-                             "terms": (term_list,),
+        return {"required": {"terms": (term_list,), },
+                "optional": {"text": ("STRING", {"forceInput": True}),
+                             # The round value representing the precision to round to,
+                             # will be set to the step value by default.
+                             # Can be set to False to disable rounding.
+                             "strength": ("FLOAT", {"default": 1.0,
+                                                    "min": 0.05,
+                                                    "max": 2.0,
+                                                    "step": 0.05,
+                                                    "round": 0.01,
+                                                    "display": "number"}),
+                             "store_input": ("BOOLEAN", {"default": False,
+                                                         "label_on": True,
+                                                         "label_off": False},),
                              },
-                "optional":
-                    {"text": ("STRING", {"forceInput": True}),
-                     "strength": ("FLOAT", {
-                         "default": 1.0,
-                         "min": 0.05,
-                         "max": 2.0,
-                         "step": 0.05,
-                         # The round value representing the precision to round to,
-                         # will be set to the step value by default.
-                         # Can be set to False to disable rounding.
-                         "round": 0.01,
-                         "display": "number"}),
-                     "store_input": ("BOOLEAN", {"default": False,
-                                                 "label_on": True,
-                                                 "label_off": False},),
-                     },
                 }
 
     def save_data_from_input(self, text):
@@ -100,14 +93,14 @@ class PromptTermList:
             else:
                 print(f'{self.name}: The label "{label}" is saved!')
             self.data[label] = value
-        with io.open(join(LISTS_PATH, "TermList{}.json".format(self.idx)),
-                     mode="w", encoding="utf-8") as f:
+        with io.open(join(LISTS_PATH, "TermList{}.json".format(self.idx)), mode="w",
+                     encoding="utf-8") as f:
             json.dump(self.data, f, indent=4)
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("Term",)
     # OUTPUT_NODE = True
-    CATEGORY = "conditioning/Term Nodes"
+    CATEGORY = "noEmbryo/Term Nodes"
     FUNCTION = "run"
 
     def run(self, terms, strength, store_input, text=None):
@@ -164,13 +157,11 @@ NODE_CLASS_MAPPINGS = {"PromptTermList1": PromptTermList1,
                        "PromptTermList3": PromptTermList3,
                        "PromptTermList4": PromptTermList4,
                        "PromptTermList5": PromptTermList5,
-                       "PromptTermList6": PromptTermList6
-                       }
+                       "PromptTermList6": PromptTermList6}
 
-NODE_DISPLAY_NAME_MAPPINGS = {"PromptTermList1": "PromptTermList 1",
-                              "PromptTermList2": "PromptTermList 2",
-                              "PromptTermList3": "PromptTermList 3",
-                              "PromptTermList4": "PromptTermList 4",
-                              "PromptTermList5": "PromptTermList 5",
-                              "PromptTermList6": "PromptTermList 6"
-                              }
+NODE_DISPLAY_NAME_MAPPINGS = {"PromptTermList1": f"PromptTermList 1 /{__author__}",
+                              "PromptTermList2": f"PromptTermList 2 /{__author__}",
+                              "PromptTermList3": f"PromptTermList 3 /{__author__}",
+                              "PromptTermList4": f"PromptTermList 4 /{__author__}",
+                              "PromptTermList5": f"PromptTermList 5 /{__author__}",
+                              "PromptTermList6": f"PromptTermList 6 /{__author__}"}

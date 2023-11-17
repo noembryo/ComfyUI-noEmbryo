@@ -1,12 +1,11 @@
-## General
+# noEmbryo Nodes
 
 [![made-with-python][Python]](https://www.python.org/)
 [![License: MIT][MIT]](LICENSE)
 
-**PromptTermList** (1-6) are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
+## PromptTermList (1-6)
+These are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
-
-### Screenshots
 
 ![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)
 
@@ -15,7 +14,7 @@
 <img src="https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png" height="180"></a>
 </p> -->
 
-## Usage
+### Usage
 Every one of the 6 nodes have a different `json` file that stores its Prompt Terms in "label"/"value" pairs.  
 The "label" part is what we see at the node's dropdown menu, and the "value" part is what it produces at its `Term` output when we run a generation job.  
   
@@ -44,6 +43,14 @@ We can delete a term by sending an empty value to the `text` input like this:
 label=The label to be deleted
 value=
 ```
+
+## Resolution Scale  
+![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
+A simple node that outputs the resolution of an image using the dimensions of an input image or custom user-defined dimensions using a Scale Factor.  
+
+## Regex Text Chopper  
+![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)
+A node that "chops" a text using a regular expression and outputs the chopped parts of the text.  
 
 
 ## Installation
