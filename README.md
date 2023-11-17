@@ -54,9 +54,11 @@ A node that "chops" a text using a regular expression and outputs the chopped pa
 
 
 ## Installation
-* cd to `ComfyUI\custom_nodes`
-* git clone https://github.com/noembryo/ComfyUI-noEmbryo.git
-* Restart ComfyUI
+* Manually:
+  * cd to `ComfyUI\custom_nodes`
+  * git clone https://github.com/noembryo/ComfyUI-noEmbryo.git
+  * Restart ComfyUI  
+* Or use the Comfy Manager
 
 
 [Python]:https://img.shields.io/badge/Made%20with-Python-1f425f.svg
