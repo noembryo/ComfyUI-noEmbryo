@@ -15,8 +15,6 @@ print(f"### Loading: {__author__} nodes v{__version__}")
 
 node_list = [
     "nodes",
-    # "resolution_scale",
-    # "regex_text_chopper",
     # "load_image_from_dir",
 ]
 
