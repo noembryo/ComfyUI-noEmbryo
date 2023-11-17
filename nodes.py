@@ -7,7 +7,7 @@ MANIFEST = {"name": "noEmbryo Nodes", "version": (0, 0, 1, 0), "author": "noEmbr
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI", }
 __author__ = "noEmbryo"
-__version__ = "0.0.1.0"
+__version__ = "0.0.2.0"
 
 LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 
