@@ -174,8 +174,8 @@ class ResolutionScale:
                 }
 
     RETURN_TYPES = ("INT", "INT", "FLOAT", "INT", "INT")
-    RETURN_NAMES = ("WIDTH", "HEIGHT", "SCALE_FACTOR",
-                    "ORIGINAL_WIDTH", "ORIGINAL_HEIGHT")
+    RETURN_NAMES = ("Width", "Height", "Scale Factor",
+                    "Original Width", "Original Height")
 
     FUNCTION = "run"
     CATEGORY = "noEmbryo"
