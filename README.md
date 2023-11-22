@@ -1,4 +1,6 @@
 # noEmbryo Nodes
+A diverse set of nodes for ComfyUI.  
+You can access them through "Add node > noEmbryo" submenu.
 
 [![made-with-python][Python]](https://www.python.org/)
 [![License: MIT][MIT]](LICENSE)

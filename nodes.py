@@ -3,9 +3,13 @@ import re
 import json
 from os.path import realpath, join
 
-MANIFEST = {"name": "noEmbryo Nodes", "version": (0, 0, 1, 0), "author": "noEmbryo",
+MANIFEST = {"name": "noEmbryo Nodes",
+            "version": (0, 0, 1, 0),
+            "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
-            "description": "Nodes for ComfyUI", }
+            "description": "Nodes for ComfyUI",
+            "license": "MIT",
+            }
 __author__ = "noEmbryo"
 __version__ = "0.0.2.1"
 
