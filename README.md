@@ -53,7 +53,7 @@ value=
 ---
 ## <a name="ResolutionScale"></a>Resolution Scale  
 ![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
-A simple node that outputs the resolution of an image using the dimensions of an input image or custom user-defined dimensions using a Scale Factor.  
+A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
 
 ---
 ## <a name="RegexTextChopper"></a>Regex Text Chopper  
