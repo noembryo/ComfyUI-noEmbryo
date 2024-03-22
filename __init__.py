@@ -1,6 +1,6 @@
 """
 @author: noEmbryo
-@title: noEmbryo nodes for ComfyUI
+@title: noEmbryo nodes
 @nickname: noEmbryo
 @description: Some useful nodes for ComfyUI
 """

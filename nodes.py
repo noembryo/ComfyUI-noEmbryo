@@ -45,7 +45,7 @@ class PromptTermList:
     # noinspection PyMethodParameters
     @classmethod
     def INPUT_TYPES(cls):
-        list_path = join(LISTS_PATH, "TermList{}.json".format(cls.idx))
+        list_path = join(LISTS_PATH, f"TermList{cls.idx}.json")
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
         return {"required": {"terms": (term_list,), },
@@ -130,7 +130,7 @@ class PromptTermList:
                     text_out = f"{text_out}, {text}"
                 else:
                     text_out = text
-        return (text_out,)
+        return (text_out, )
 
 
 class PromptTermList1(PromptTermList):
@@ -186,7 +186,18 @@ class ResolutionScale:
 
     def run(self, width, height, scale_factor, image=None):
         if image is not None:
-            _, height, width, _ = image.shape
+            _, img_height, img_width, _ = image.shape
+            if width == 0:
+                ratio = img_width / img_height
+                width = height * ratio
+                width = int(width / 4) * 4
+            elif height == 0:
+                ratio = img_height / img_width
+                height = width * ratio
+                height = int(height / 4) * 4
+            else:
+                width = img_width
+                height = img_height
 
         new_width = int(width * scale_factor)
         new_height = int(height * scale_factor)
