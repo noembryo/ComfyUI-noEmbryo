@@ -5,5 +5,5 @@ __pycache__
 js
 TermList*.json
 ___backup.pyw
-ComfyUI.iml
 load_image_from_dir.py
+/ComfyUI-noEmbryo.iml
