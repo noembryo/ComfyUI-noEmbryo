@@ -1,2 +1,9 @@
 # Project exclude paths
-/XTRA/
+XTRA
+__pycache__
+.idea
+js
+TermList*
+___backup.pyw
+ComfyUI.iml
+load_image_from_dir.py

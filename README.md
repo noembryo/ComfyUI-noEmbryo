@@ -1,10 +1,16 @@
 # noEmbryo Nodes
+A diverse set of nodes for ComfyUI.  
+* [PromptTermList (1-6)](#PromptTermList)
+* [Resolution Scale](#ResolutionScale)  
+* [Regex Text Chopper](#RegexTextChopper)  
+
+You can access them through "Add node > noEmbryo" submenu.  
 
 [![made-with-python][Python]](https://www.python.org/)
 [![License: MIT][MIT]](LICENSE)
 
 ---
-## PromptTermList (1-6)
+## <a name="PromptTermList"></a>PromptTermList (1-6)
 These are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
 
@@ -45,12 +51,14 @@ label=The label to be deleted
 value=
 ```
 ---
-## Resolution Scale  
+## <a name="ResolutionScale"></a>Resolution Scale  
 ![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
-A simple node that outputs the resolution of an image using the dimensions of an input image or custom user-defined dimensions using a Scale Factor.  
+A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
+
+If there is an input image connected, setting either `width` or `height` to 0 will use the other dimension to scale the image (but always multiple of 4).
 
 ---
-## Regex Text Chopper  
+## <a name="RegexTextChopper"></a>Regex Text Chopper  
 ![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)
 A node that "chops" a text using a regular expression and outputs the chopped parts of the text.  
 
