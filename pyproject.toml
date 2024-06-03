@@ -13,6 +13,6 @@ Repository = "https://github.com/noembryo/ComfyUI-noEmbryo"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = "noEmbryo"
+PublisherId = "noembryo"
 DisplayName = "ComfyUI-noEmbryo"
 Icon = ""
