@@ -1,7 +1,9 @@
 import io
 import re
 import json
-from os.path import realpath, join
+import os
+import inspect
+from server import PromptServer
 
 MANIFEST = {"name": "noEmbryo Nodes",
             "version": (0, 0, 1, 0),
@@ -13,7 +15,18 @@ MANIFEST = {"name": "noEmbryo Nodes",
 __author__ = "noEmbryo"
 __version__ = "0.0.2.1"
 
-LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
+def get_comfy_dir(subpath=None, mkdir=False):
+    dir = os.path.dirname(inspect.getfile(PromptServer))
+    if subpath is not None:
+        dir = os.path.join(dir, subpath)
+
+    dir = os.path.abspath(dir)
+
+    if mkdir and not os.path.exists(dir):
+        os.makedirs(dir)
+    return dir
+
+LISTS_PATH = get_comfy_dir("custom_nodes/ComfyUI-noEmbryo/TermLists/")
 
 
 class PromptTermList:
@@ -27,6 +40,10 @@ class PromptTermList:
     def __init__(self):
         super(PromptTermList, self).__init__()
         self.name = type(self).__name__
+
+    @classmethod
+    def term_list_file(cls):
+        return os.path.join(LISTS_PATH, f"TermList{cls.idx}.json")
 
     @classmethod
     def load_data_from_json(cls, json_file_path):
@@ -45,7 +62,7 @@ class PromptTermList:
     # noinspection PyMethodParameters
     @classmethod
     def INPUT_TYPES(cls):
-        list_path = join(LISTS_PATH, f"TermList{cls.idx}.json")
+        list_path = cls.term_list_file()
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
         return {"required": {"terms": (term_list,), },
@@ -98,8 +115,10 @@ class PromptTermList:
             else:
                 print(f'{self.name}: The label "{label}" is saved!')
             self.data[label] = value
-        with io.open(join(LISTS_PATH, "TermList{}.json".format(self.idx)), mode="w",
-                     encoding="utf-8") as f:
+
+        save_path=self.term_list_file()
+        print(f'saving file: {save_path}')
+        with io.open(save_path, mode="w",encoding="utf-8") as f:
             json.dump(self.data, f, indent=4)
 
     RETURN_TYPES = ("STRING",)
