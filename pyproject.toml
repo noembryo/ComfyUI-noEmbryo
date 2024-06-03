@@ -15,4 +15,4 @@ Repository = "https://github.com/noembryo/ComfyUI-noEmbryo"
 [tool.comfy]
 PublisherId = "noembryo"
 DisplayName = "ComfyUI-noEmbryo"
-Icon = ""
+Icon = "https://iili.io/JmSdmAJ.png"
