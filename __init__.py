@@ -6,7 +6,8 @@
 """
 
 import json
-import os, io
+import os
+import io
 from os.path import isfile, join, isdir
 import importlib
 from .nodes import LISTS_PATH, __author__, __version__

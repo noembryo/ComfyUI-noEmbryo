@@ -1,9 +1,9 @@
 # Project exclude paths
-XTRA
-__pycache__
-.idea
-js
-TermList*
-___backup.pyw
-ComfyUI.iml
-load_image_from_dir.py
+/XTRA
+/__pycache__
+/.idea
+/js
+/TermList*.json
+/___backup.pyw
+/load_image_from_dir.py
+/ComfyUI-noEmbryo.iml

@@ -184,6 +184,7 @@ class ResolutionScale:
     FUNCTION = "run"
     CATEGORY = "noEmbryo"
 
+    # noinspection PyMethodMayBeStatic
     def run(self, width, height, scale_factor, image=None):
         if image is not None:
             _, img_height, img_width, _ = image.shape
