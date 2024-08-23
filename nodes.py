@@ -4,7 +4,7 @@ import json
 from os.path import realpath, join, dirname
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (0, 0, 1, 0),
+            "version": (1, 0, 3),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
