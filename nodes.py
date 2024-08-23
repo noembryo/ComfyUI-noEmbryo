@@ -11,7 +11,7 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "0.0.2.1"
+__version__ = "1.0.2"
 
 LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 
@@ -59,9 +59,7 @@ class PromptTermList:
                                                     "step": 0.05,
                                                     "round": 0.01,
                                                     "display": "number"}),
-                             "store_input": ("BOOLEAN", {"default": False,
-                                                         "label_on": True,
-                                                         "label_off": False},),
+                             "store_input": ("BOOLEAN", {"default": False}),
                              },
                 }
 
@@ -113,7 +111,7 @@ class PromptTermList:
         text_out = ""
         for i in self.data_labels:
             if i[0] == selected:
-                text_out = i[1]
+                text_out = f"{i[1]} "
                 break
         if selected != "None" and strength != 1.0:
             text_out = f"({text_out}:{strength})"
