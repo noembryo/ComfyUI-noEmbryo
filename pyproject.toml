@@ -6,7 +6,7 @@ A collection of nodes for ComyUI.
 - "Resolution Scale" is a node that resizes an image using pixels or scale factor.
 - "Regex Text Chopper" is a node that cuts text based on regex."""
 version = "1.0.1"
-license = "MIT"
+license = { text = "MIT License" }
 
 [project.urls]
 Repository = "https://github.com/noembryo/ComfyUI-noEmbryo"
