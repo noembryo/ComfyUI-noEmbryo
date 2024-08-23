@@ -1,7 +1,7 @@
 import io
 import re
 import json
-from os.path import realpath, join
+from os.path import realpath, join, dirname
 
 MANIFEST = {"name": "noEmbryo Nodes",
             "version": (0, 0, 1, 0),
@@ -11,9 +11,10 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
-LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
+# LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
+LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 
 
 class PromptTermList:
