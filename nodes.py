@@ -11,7 +11,7 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 # LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
@@ -237,7 +237,7 @@ class RegExTextChopper:
     def run(self, text, regex):
         if self.is_valid_regex(regex):
             obj = re.compile(regex, re.MULTILINE)
-            result = obj.findall(text)
+            result = obj.findall(text)[0]
             try:
                 text1 = result[0]
             except IndexError:
