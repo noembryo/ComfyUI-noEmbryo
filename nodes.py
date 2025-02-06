@@ -237,7 +237,8 @@ class RegExTextChopper:
     def run(self, text, regex):
         if self.is_valid_regex(regex):
             obj = re.compile(regex, re.MULTILINE)
-            result = obj.findall(text)[0]
+            result = obj.findall(text)
+            # result = obj.findall(text)[0]
             try:
                 text1 = result[0]
             except IndexError:
