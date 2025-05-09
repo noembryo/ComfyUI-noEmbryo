@@ -2,10 +2,12 @@
 name = "comfyui-noembryo"
 description = """
 A collection of nodes for ComyUI.
-- "PromptTermList (1-6)" nodes to help with the creation of Prompts.
-- "Resolution Scale" is a node that resizes an image using pixels or scale factor.
-- "Regex Text Chopper" is a node that cuts text based on regex."""
-version = "1.0.5"
+* "PromptTermList (1-6)" nodes to help with the creation of Prompts.
+* "Resolution Scale" is a node that resizes an image using pixels or scale factor.
+* "Regex Text Chopper" is a node that cuts text based on regex.
+* "Auto Save Workflow" can save the current workflow to a .json file automatically.
+"""
+version = "1.1.0"
 license = {text = "MIT License"}
 
 [project.urls]

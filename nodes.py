@@ -1,7 +1,8 @@
-import io
-import re
+import os, re, io
 import json
 from os.path import realpath, join, dirname
+from datetime import datetime
+import folder_paths
 
 MANIFEST = {"name": "noEmbryo Nodes",
             "version": (1, 0, 3),
@@ -11,7 +12,7 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.0.5"
+__version__ = "1.1.0"
 
 # LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
@@ -262,6 +263,77 @@ class RegExTextChopper:
         return text1, text2, text3, text4, text_all
 
 
+class AutoSaveWorkflow:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "save_directory": ("STRING", {
+                    "default": "saved_workflows",
+                    "tooltip": "Relative to ComfyUI output directory or absolute path"
+                }),
+                "filename": ("STRING", {
+                    "default": "workflow_{timestamp}",
+                    "tooltip": "Filename (include {timestamp} for unique timestamps)"
+                }),
+                "trigger": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "Enabled",
+                    "label_off": "Disabled",
+                    "tooltip": "Save the workflow if Enabled"
+                }),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+                "trigger": "BOOLEAN",  # Hidden trigger input
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "BOOLEAN")
+    RETURN_NAMES = ("status", "✳️trigger")
+    OUTPUT_TOOLTIPS = ("Get a status report text",
+                       "Dammy output, to trigger execution if nothing is connected")
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    OUTPUT_NODE = True
+
+    def execute(self, trigger, save_directory, filename, prompt=None, extra_pnginfo=None):
+        status = "Trigger disabled - workflow not saved"
+
+        if trigger:
+            try:
+                workflow_data = extra_pnginfo.get("workflow", {}) if extra_pnginfo else {}
+
+                # Process save directory
+                if os.path.isabs(save_directory):
+                    output_dir = save_directory
+                else:
+                    output_dir = os.path.join(folder_paths.get_output_directory(),
+                                              save_directory)
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Process filename with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                processed_filename = filename.replace("{timestamp}", timestamp)
+
+                # Ensure .json extension
+                if not processed_filename.lower().endswith('.json'):
+                    processed_filename += '.json'
+
+                save_path = os.path.join(output_dir, processed_filename)
+
+                # Save workflow to JSON
+                with open(save_path, "w", encoding="utf-8") as f:
+                    json.dump(workflow_data, f, indent=4)
+
+                status = f"Workflow saved to: {save_path}"
+            except Exception as e:
+                status = f"Error saving workflow: {str(e)}"
+
+        return (status,)
+
+
 NODE_CLASS_MAPPINGS = {"PromptTermList1": PromptTermList1,
                        "PromptTermList2": PromptTermList2,
                        "PromptTermList3": PromptTermList3,
@@ -270,6 +342,7 @@ NODE_CLASS_MAPPINGS = {"PromptTermList1": PromptTermList1,
                        "PromptTermList6": PromptTermList6,
                        f"Resolution Scale /{__author__}": ResolutionScale,
                        f"Regex Text Chopper /{__author__}": RegExTextChopper,
+                       f"Auto Save Workflow /{__author__}": AutoSaveWorkflow
                        }
 
 NODE_DISPLAY_NAME_MAPPINGS = {"PromptTermList1": f"PromptTermList 1 /{__author__}",
@@ -282,4 +355,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {"PromptTermList1": f"PromptTermList 1 /{__author__
                                   f"Resolution Scale /{__author__}",
                               f"Regex Text Chopper /{__author__}":
                                   f"Regex Text Chopper /{__author__}",
+                              f"Auto Save Workflow /{__author__}":
+                                  f"Auto Save Workflow /{__author__}",
                               }
