@@ -1,6 +1,6 @@
 import os, re, io
 import json
-from os.path import realpath, join, dirname
+from os.path import realpath, join, dirname, isabs
 from datetime import datetime
 import folder_paths
 
@@ -306,11 +306,10 @@ class AutoSaveWorkflow:
                 workflow_data = extra_pnginfo.get("workflow", {}) if extra_pnginfo else {}
 
                 # Process save directory
-                if os.path.isabs(save_directory):
+                if isabs(save_directory):
                     output_dir = save_directory
                 else:
-                    output_dir = os.path.join(folder_paths.get_output_directory(),
-                                              save_directory)
+                    output_dir = join(folder_paths.get_output_directory(), save_directory)
                 os.makedirs(output_dir, exist_ok=True)
 
                 # Process filename with timestamp
@@ -321,7 +320,7 @@ class AutoSaveWorkflow:
                 if not processed_filename.lower().endswith('.json'):
                     processed_filename += '.json'
 
-                save_path = os.path.join(output_dir, processed_filename)
+                save_path = join(output_dir, processed_filename)
 
                 # Save workflow to JSON
                 with open(save_path, "w", encoding="utf-8") as f:
