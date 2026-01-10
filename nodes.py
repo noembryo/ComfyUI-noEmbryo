@@ -12,7 +12,7 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
@@ -44,14 +44,20 @@ class PromptTermList:
         except FileNotFoundError:
             pass
 
-    # noinspection PyMethodParameters
     @classmethod
     def INPUT_TYPES(cls):
         list_path = join(LISTS_PATH, f"TermList{cls.idx}.json")
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
-        return {"required": {"terms": (term_list,), },
-                "optional": {"text": ("STRING", {"forceInput": True}),
+        # noinspection SqlNoDataSourceInspection,SqlResolve
+        return {"required": {"terms": (term_list,{"tooltip": "Select a term from the "
+                                                             "TermList with the "
+                                                             "corresponding number"}), },
+                "optional": {"text": ("STRING", {"forceInput": True,
+                                                 "tooltip": "Input text to store in the "
+                                                            "TermList\nUse the format:\n"
+                                                            "label=... ...\n"
+                                                            "value=.... .... ..."}),
                              # The round value representing the precision to round to,
                              # will be set to the step value by default.
                              # Can be set to False to disable rounding.
@@ -60,8 +66,16 @@ class PromptTermList:
                                                     "max": 2.0,
                                                     "step": 0.05,
                                                     "round": 0.01,
-                                                    "display": "number"}),
-                             "store_input": ("BOOLEAN", {"default": False}),
+                                                    "display": "number",
+                                                    "tooltip": "Controls how much the "
+                                                    "image is allowed to change.\n"
+                                                    "0.0 = almost no change\n"
+                                                    "1.0 = maximum creativity"}),
+                             "store_input": ("BOOLEAN",
+                                             {"default": False,
+                                              "tooltip": "Store the input text in the "
+                                                         "TermList\nUse the format:\n"
+                                                         "label=... ...\nvalue=.... .... ..."}),
                              },
                 }
 
@@ -81,7 +95,8 @@ class PromptTermList:
             print(f"{self.name}:", self.input_error)
             return
         label = lines[0][6:]
-        value = lines[1][6:]
+        lines_txt = "\n".join(lines[1:])
+        value = lines_txt[6:]
         if label == "None":
             print(f'{self.name}: The label "{label}" cannot be changed!')
             return
@@ -214,8 +229,9 @@ class RegExTextChopper:
     @classmethod
     def INPUT_TYPES(cls):
 
-        return {"required": {"text": ("STRING", {"forceInput": True}),
-                             "regex": ("STRING", {})
+        return {"required": {"text": ("STRING", {"forceInput": True,
+                                                 "tooltip": "The text that we'll parse"}),
+                             "regex": ("STRING", {"tooltip": "The RegEx pattern"})
                              },
                 "optional": {},
                 }

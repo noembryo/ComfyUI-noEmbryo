@@ -37,7 +37,7 @@ for i in range(6):  # create TermList1-6 if not exists
         with io.open(file_name, "w+", encoding="utf-8", newline="\n") as f:
             json.dump({"None": ""}, f, indent=4)
 
-# WEB_DIRECTORY = "./js"
+WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS",
-           # "WEB_DIRECTORY"
+           "WEB_DIRECTORY",
            ]
