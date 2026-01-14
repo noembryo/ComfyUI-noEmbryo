@@ -46,7 +46,10 @@ For the custom text integration, there is a variable (can be specified by the us
     value=
     ```
   All of these methods will update the `.json` file, and the node will output a message about the success or failure of the operation.  
-  We can also load an empty `.json`file and use this method to populate it.
+  We can also load an empty `.json`file and use this method to populate it.  
+
+<u>_**After changing the `.json` file, we must reload the ComfyUI page, so the node can reload the updated file.**_</u>
+
 ---
 ## Resolution Scale
 ![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
