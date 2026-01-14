@@ -122,9 +122,9 @@ class JsonPromptLoader:
                         msg = f'{filename}: The item "{item}" does not exist!'
                 else:  # save/update item
                     if item in self.data:
-                        msg = f'{filename}: The item "{item}" is updated!'
+                        msg = f'{filename}: The item "{item}" was updated!'
                     else:
-                        msg = f'{filename}: The item "{item}" is added!'
+                        msg = f'{filename}: The item "{item}" was added!'
                     self.data[item] = value
                     self.save_json_file()
                 return msg
