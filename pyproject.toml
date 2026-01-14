@@ -1,5 +1,5 @@
 [project]
-name = "noEmbryo"
+name = "comfyui-noembryo"
 description = """
 A collection of nodes for ComyUI.
 * "JsonPromptLoader" is a node that enhances a propt using a .json file with `item:prompt` pairs.
