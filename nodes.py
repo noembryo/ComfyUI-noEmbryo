@@ -1,6 +1,6 @@
 import os, re, io
 import json
-from os.path import realpath, join, dirname, isabs
+from os.path import realpath, join, dirname, isabs, splitext, basename
 from datetime import datetime
 import folder_paths
 
@@ -12,10 +12,131 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
+
+
+class JsonPromptLoader:
+    data = {}
+    data_labels = ["None"]
+    json_path = ""
+
+    def __init__(self):
+        super(JsonPromptLoader, self).__init__()
+        self.name = type(self).__name__
+
+    @classmethod
+    def load_data(cls, json_path):
+        cls.json_path = ""
+        if not splitext(json_path)[1].lower() == ".json":
+            return
+        if json_path:
+            try:
+                with io.open(json_path, mode="r", encoding="utf-8") as f:
+                    cls.data.clear()
+                    cls.data["None"] = ""
+                    cls.data.update(json.load(f))
+                    cls.data_labels[:] = list(cls.data.keys())
+                    cls.json_path = json_path
+            except (FileNotFoundError, json.JSONDecodeError):
+                cls.data.clear()
+                cls.data.update({})
+                cls.data_labels[:] = ["None"]
+                if os.stat(json_path).st_size == 0:  # empty json files
+                    cls.json_path = json_path
+        else:  # no path given
+            cls.data.clear()
+            cls.data.update({})
+            cls.data_labels[:] = ["None"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"json_path": ("STRING", {"default": "",
+                                                      "tooltip": "Path to a JSON file with "
+                                                                 "`item`:`prompt` pairs"}),
+                            "selected_item": (cls.data_labels, cls.data),  # Options will be updated by JS
+                            "variable": ("STRING", {"default": "{subject}",
+                                                    "tooltip": "If this variable exists in the selected item's prompt,\n"
+                                                               "it will be replaced with the custom_prompt text"}),
+                            "custom_prompt": ("STRING", {"multiline": True, "default": "",
+                                                         "tooltip": "Text to replace the variable in the selected prompt.\n"
+                                                                    "You can also use it to save a new item or update an existing one.\n"
+                                                                    "To do that you should use the following format:\n"
+                                                                    "item=... ...\n"
+                                                                    "value=.... .... ...\n"
+                                                                    "To delete an existing item, use an empty value:\n"
+                                                                    "item=... ...\n"
+                                                                    "value="}),
+                            },
+                }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("Prompt",)
+    FUNCTION = "run"
+    CATEGORY = "noEmbryo"
+
+    def run(self, json_path, selected_item, variable, custom_prompt):
+        self.load_data(json_path)
+        if custom_prompt:
+            message = self.edit_data(custom_prompt)
+            if message:  # if the custom_prompt was saved successfully
+                return (message,)
+        if selected_item in self.data and selected_item != "None":
+            prompt = self.data[selected_item]
+            # if variable and "{" + variable + "}" in prompt:
+            if variable and variable in prompt:
+                prompt = prompt.replace(variable, custom_prompt)
+                # prompt = prompt.replace("{" + variable + "}", custom_prompt)
+            elif custom_prompt:
+                prompt += " " + custom_prompt
+        else:
+            prompt = custom_prompt
+        return (prompt,)
+
+    def edit_data(self, text):
+        """ Parses the json values from the custom_prompt and changes the json file
+
+        :type text: str
+        :param text: The custom_prompt text
+        """
+        lines = text.splitlines()
+        if len(lines) >= 2:
+            if all((lines[0].startswith("item="), lines[1].startswith("value="))):
+                if not self.json_path:
+                    return False
+                item = lines[0][5:]
+                lines_txt = "\n".join(lines[1:])
+                value = lines_txt[6:]
+                filename = basename(self.json_path)
+                if item == "None":  # cannot change None
+                    msg = f'{filename}: The item "{item}" cannot be changed!'
+                    return msg
+                if not value:  # delete item
+                    if item in self.data:
+                        del self.data[item]
+                        msg = f'{filename}: The item "{item}" was deleted!'
+                        self.save_json_file()
+                    else:
+                        msg = f'{filename}: The item "{item}" does not exist!'
+                else:  # save/update item
+                    if item in self.data:
+                        msg = f'{filename}: The item "{item}" is updated!'
+                    else:
+                        msg = f'{filename}: The item "{item}" is added!'
+                    self.data[item] = value
+                    self.save_json_file()
+                return msg
+        return False
+
+    def save_json_file(self):
+        with io.open(self.json_path, mode="w", encoding="utf-8") as f:
+            data = self.data.copy()
+            if "None" in data:
+                del data["None"]
+            # noinspection PyTypeChecker
+            json.dump(data, f, ensure_ascii=False, indent=4)
 
 
 class PromptTermList:
@@ -50,7 +171,7 @@ class PromptTermList:
         cls.load_data_from_json(list_path)
         term_list = [i[0] for i in cls.data_labels]
         # noinspection SqlNoDataSourceInspection,SqlResolve
-        return {"required": {"terms": (term_list,{"tooltip": "Select a term from the "
+        return {"required": {"terms": (term_list,{"tooltip": "Choose a term from the "
                                                              "TermList with the "
                                                              "corresponding number"}), },
                 "optional": {"text": ("STRING", {"forceInput": True,
@@ -115,7 +236,8 @@ class PromptTermList:
             self.data[label] = value
         with io.open(join(LISTS_PATH, "TermList{}.json".format(self.idx)), mode="w",
                      encoding="utf-8") as f:
-            json.dump(self.data, f, indent=4)
+            # noinspection PyTypeChecker
+            json.dump(self.data, f, ensure_ascii=False, indent=4)
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("Term",)
@@ -340,6 +462,7 @@ class AutoSaveWorkflow:
 
                 # Save workflow to JSON
                 with open(save_path, "w", encoding="utf-8") as f:
+                    # noinspection PyTypeChecker
                     json.dump(workflow_data, f, indent=4)
 
                 status = f"Workflow saved to: {save_path}"
@@ -349,27 +472,26 @@ class AutoSaveWorkflow:
         return (status,)
 
 
-NODE_CLASS_MAPPINGS = {"PromptTermList1": PromptTermList1,
+NODE_CLASS_MAPPINGS = {f"JsonPromptLoader -{__author__}": JsonPromptLoader,
+                       f"Resolution Scale -{__author__}": ResolutionScale,
+                       f"Regex Text Chopper -{__author__}": RegExTextChopper,
+                       f"Auto Save Workflow -{__author__}": AutoSaveWorkflow,
+                       "PromptTermList1": PromptTermList1,
                        "PromptTermList2": PromptTermList2,
                        "PromptTermList3": PromptTermList3,
                        "PromptTermList4": PromptTermList4,
                        "PromptTermList5": PromptTermList5,
                        "PromptTermList6": PromptTermList6,
-                       f"Resolution Scale /{__author__}": ResolutionScale,
-                       f"Regex Text Chopper /{__author__}": RegExTextChopper,
-                       f"Auto Save Workflow /{__author__}": AutoSaveWorkflow
                        }
 
-NODE_DISPLAY_NAME_MAPPINGS = {"PromptTermList1": f"PromptTermList 1 /{__author__}",
+NODE_DISPLAY_NAME_MAPPINGS = {f"JsonPromptLoader -{__author__}": f"Json Prompt Loader /{__author__}",
+                              f"Resolution Scale -{__author__}": f"Resolution Scale /{__author__}",
+                              f"Regex Text Chopper -{__author__}": f"Regex Text Chopper /{__author__}",
+                              f"Auto Save Workflow -{__author__}": f"Auto Save Workflow /{__author__}",
+                              "PromptTermList1": f"PromptTermList 1 /{__author__}",
                               "PromptTermList2": f"PromptTermList 2 /{__author__}",
                               "PromptTermList3": f"PromptTermList 3 /{__author__}",
                               "PromptTermList4": f"PromptTermList 4 /{__author__}",
                               "PromptTermList5": f"PromptTermList 5 /{__author__}",
                               "PromptTermList6": f"PromptTermList 6 /{__author__}",
-                              f"Resolution Scale /{__author__}":
-                                  f"Resolution Scale /{__author__}",
-                              f"Regex Text Chopper /{__author__}":
-                                  f"Regex Text Chopper /{__author__}",
-                              f"Auto Save Workflow /{__author__}":
-                                  f"Auto Save Workflow /{__author__}",
                               }

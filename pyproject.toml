@@ -1,13 +1,14 @@
 [project]
-name = "comfyui-noembryo"
+name = "noEmbryo"
 description = """
 A collection of nodes for ComyUI.
-* "PromptTermList (1-6)" nodes to help with the creation of Prompts.
+* "JsonPromptLoader" is a node that enhances a propt using a .json file with `item:prompt` pairs.
 * "Resolution Scale" is a node that resizes an image using pixels or scale factor.
 * "Regex Text Chopper" is a node that cuts text based on regex.
 * "Auto Save Workflow" can save the current workflow to a .json file automatically.
+* "PromptTermList (1-6)" nodes to help with the creation of Prompts.
 """
-version = "1.2.0"
+version = "1.3.0"
 license = {text = "MIT License"}
 
 [project.urls]
@@ -16,5 +17,5 @@ Repository = "https://github.com/noembryo/ComfyUI-noEmbryo"
 
 [tool.comfy]
 PublisherId = "noembryo"
-DisplayName = "ComfyUI-noEmbryo"
+DisplayName = "noEmbryo"
 Icon = "https://iili.io/JmSdmAJ.png"
