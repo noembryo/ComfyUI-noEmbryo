@@ -12,7 +12,7 @@ MANIFEST = {"name": "noEmbryo Nodes",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 # LISTS_PATH = realpath("./custom_nodes/ComfyUI-noEmbryo/TermLists/")
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
