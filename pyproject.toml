@@ -8,7 +8,7 @@ A collection of nodes for ComyUI.
 * "Auto Save Workflow" can save the current workflow to a .json file automatically.
 * "PromptTermList (1-6)" nodes to help with the creation of Prompts.
 """
-version = "1.3.1"
+version = "1.3.2"
 license = {text = "MIT License"}
 
 [project.urls]
