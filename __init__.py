@@ -10,6 +10,7 @@ import os
 import io
 from os.path import isfile, join, isdir
 import importlib
+import types
 from aiohttp import web
 from server import PromptServer
 
@@ -24,7 +25,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {}
 
 node_list = [
     "nodes",
-    # "load_image_from_dir",
+    # "load_image_from_path",
 ]
 
 for module_name in node_list:

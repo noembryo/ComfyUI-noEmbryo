@@ -51,20 +51,26 @@ For the custom text integration, there is a variable (can be specified by the us
 <u>_**After changing the `.json` file, we must reload the ComfyUI page, so the node can reload the updated file.**_</u>
 
 ---
+## Load Image (from path)
+![LoadImage](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.png)  
+A node lets you load an image from any path in your computer, either by pasting an address, or by using a file picker to browse your drives.  
+It also displays the image in the node.  
+It's an enhanced version of the "[Load Image From Path (Enhanced)](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes#load-image-from-path-enhanced)" from [`ComfyUI_Ib_CustomNodes`](ComfyUI_Ib_CustomNodes).
+---
 ## Resolution Scale
-![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
+![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
 A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
 
 If there is an input image connected, setting either `width` or `height` to 0 will use the other dimension to scale the image (but always multiple of 4).
 
 ---
 ## Regex Text Chopper
-![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)
+![RegExChopper](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)
 A node that "chops" a text using a regular expression and outputs the chopped parts of the text. 
 
 ---
 ## Auto Save Workflow
-![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/auto_save_workflow.png)  
+![AutoSaveWorkflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/auto_save_workflow.png)  
 This node can save the current workflow to a `.json` file, every time a generation job is run.
 - **UI controls**
   - **save_directory** is the directory where the `.json` file will be saved.  
@@ -82,7 +88,7 @@ This node can save the current workflow to a `.json` file, every time a generati
 <u>**The PromptTermList nodes are now obsolete, and can mostly be replaced by the [Json Prompt Loader](#json-prompt-loader) node.  
 I won't remove them for compatibility reasons, but I would recommend using the [JsonPromptLoader](#json-prompt-loader) node instead.**</u>
 
-![Demo workflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)
+![PromptTermList](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)
 These are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
 ### Usage

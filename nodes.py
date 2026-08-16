@@ -3,6 +3,7 @@ import json
 from os.path import realpath, join, dirname, isabs, splitext, basename
 from datetime import datetime
 import folder_paths
+from .load_image_from_path import LoadImageFromPathEnhanced
 
 MANIFEST = {"name": "noEmbryo Nodes",
             "version": (1, 0, 3),
@@ -476,6 +477,7 @@ NODE_CLASS_MAPPINGS = {f"JsonPromptLoader -{__author__}": JsonPromptLoader,
                        f"Resolution Scale -{__author__}": ResolutionScale,
                        f"Regex Text Chopper -{__author__}": RegExTextChopper,
                        f"Auto Save Workflow -{__author__}": AutoSaveWorkflow,
+                       f"Load Image (from path) -{__author__}": LoadImageFromPathEnhanced,
                        "PromptTermList1": PromptTermList1,
                        "PromptTermList2": PromptTermList2,
                        "PromptTermList3": PromptTermList3,
@@ -488,6 +490,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {f"JsonPromptLoader -{__author__}": f"Json Prompt L
                               f"Resolution Scale -{__author__}": f"Resolution Scale /{__author__}",
                               f"Regex Text Chopper -{__author__}": f"Regex Text Chopper /{__author__}",
                               f"Auto Save Workflow -{__author__}": f"Auto Save Workflow /{__author__}",
+                              f"Load Image (from path) -{__author__}": f"Load Image (from path) /{__author__}",
                               "PromptTermList1": f"PromptTermList 1 /{__author__}",
                               "PromptTermList2": f"PromptTermList 2 /{__author__}",
                               "PromptTermList3": f"PromptTermList 3 /{__author__}",
