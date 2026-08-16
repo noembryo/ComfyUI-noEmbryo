@@ -45,8 +45,8 @@ For the custom text integration, there is a variable (can be specified by the us
     item=An existing title/keyword
     value=
     ```
-  All of these methods will update the `.json` file, and the node will output a message about the success or failure of the operation.  
-  We can also load an empty `.json`file and use this method to populate it.  
+    All of these methods will update the `.json` file, and the node will output a message about the success or failure of the operation.  
+    We can also load an empty `.json`file and use this method to populate it.  
 
 <u>_**After changing the `.json` file, we must reload the ComfyUI page, so the node can reload the updated file.**_</u>
 
@@ -56,7 +56,7 @@ For the custom text integration, there is a variable (can be specified by the us
 A node lets you load an image from any path in your computer, either by pasting an address, or by using a file picker to browse your drives.  
 It also displays the image in the node.  
 It's an enhanced version of the "[Load Image From Path (Enhanced)](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes#load-image-from-path-enhanced)" from [`ComfyUI_Ib_CustomNodes`](ComfyUI_Ib_CustomNodes).
----
+
 ## Resolution Scale
 ![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
 A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
@@ -95,7 +95,7 @@ These are some nodes that help with the creation of Prompts inside [ComfyUI](htt
 
 Every one of these 6 nodes have a different `json` file that stores its Prompt Terms in "label"/"value" pairs.  
 The "label" part is what we see at the node's dropdown menu, and the "value" part is what it produces at its `Term` output when we run a generation job.  
-  
+
 These `json` files are located inside the `TermLists` directory, in the node's folder.  
 There are two ways to add a new term.  
 - From within ComfyUI:
@@ -115,7 +115,7 @@ There are two ways to add a new term.
 
 This `text` input is also useful if we want to manually add something *after* our term, or as the *only* term if we select the `None` label of the dropdown.  
 The `strength` value is changing the impact of the term by using the parenthesis format like this: `(a great term:1.3)`  
-  
+
 We can delete a term by sending an empty value to the `text` input like this:
 ```
 label=The label to be deleted
