@@ -52,7 +52,7 @@ For the custom text integration, there is a variable (can be specified by the us
 
 ---
 ## Load Image (from path)
-![LoadImage](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.png)  
+![LoadImage](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
 A node lets you load an image from any path in your computer, either by pasting an address, or by using a file picker to browse your drives.  
 It also displays the image in the node.  
 It's an enhanced version of the "[Load Image From Path (Enhanced)](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes#load-image-from-path-enhanced)" from [`ComfyUI_Ib_CustomNodes`](ComfyUI_Ib_CustomNodes).
