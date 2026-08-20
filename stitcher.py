@@ -31,7 +31,7 @@ try:
 except Exception:
     torchaudio = None
 
-_LOG = logging.getLogger("h3_motion_context_archive")
+log_ = logging.getLogger("h3_motion_context_archive")
 
 
 INDEX_RE = re.compile(r"(?:^|_)(\d{5})(?:\.safetensors)$", re.IGNORECASE)
@@ -244,6 +244,47 @@ def _crossfade_boundary(prev_tail_images, cur_images, prev_tail_wave, cur_wave,
     return blend_images, blend_wave
 
 
+def _av_from_live_latent(latent):
+    """Extract (video, audio) tensors from an in-memory H3 sampler LATENT,
+    matching the layout _load_archive() returns from a saved archive.
+
+    NOTE: verify this against your installed Motion Context version before
+    relying on it -- run the debug snippet in the comment below once to
+    confirm the real attribute/key names, then adjust this function.
+    """
+    # --- Debug helper: uncomment once to inspect the real object ---
+    # _LOG.warning("LIVE LATENT DEBUG: type=%s repr=%s",
+    #              type(latent),
+    #              getattr(latent, "__dict__", None) or
+    #              (latent.keys() if isinstance(latent, dict) else dir(latent)))
+
+    # Case 1: plain dict, e.g. {"samples": video_t, "audio_samples": audio_t}
+    if isinstance(latent, dict):
+        log_.info("1. dict")
+        video = latent.get("samples") or latent.get("video")
+        audio = latent.get("audio_samples") or latent.get("audio")
+        if video is not None and audio is not None:
+            return video, audio
+
+    # Case 2: object with .video / .audio attributes (NestedTensor-style)
+    if hasattr(latent, "video") and hasattr(latent, "audio"):
+        log_.info("2. video/audio")
+        return latent.video, latent.audio
+
+    # Case 3: tuple/list of two tensors (video, audio)
+    if isinstance(latent, (tuple, list)) and len(latent) == 2:
+        log_.info("3. tuple/list")
+        return latent[0], latent[1]
+    log_.info("4. unknown")
+
+    raise ValueError(
+        "Could not extract video/audio from the connected live latent "
+        "(type=%s). Uncomment the debug line above, run once, check the "
+        "console output, and adjust _av_from_live_latent() accordingly."
+        % type(latent)
+    )
+
+
 class MiniMaxH3ContextStitcher:
     """Load, decode, trim, and concatenate approved H3 Motion Context clips."""
 
@@ -305,6 +346,18 @@ class MiniMaxH3ContextStitcher:
                     "tooltip": "Use ComfyUI's standard VAEDecodeAudio per-clip normalization. Disable if you want "
                                "raw VAE waveform levels before concatenation."
                 }),
+                "latent": ("LATENT", {
+                    "tooltip": "Optional: the currently-generated AV latent (from your "
+                               "H3 sampler), used in place of the highest-numbered file "
+                               "on disk. Requires use_live_latent to be enabled."}),
+                    "use_live_latent": ("BOOLEAN", {
+                        "default": False,
+                        "tooltip": "If enabled and 'latent' is connected, the "
+                                   "highest-indexed clip file on disk is skipped and "
+                                   "replaced with the live latent input instead -- "
+                                   "avoiding a race with the parallel SaveLatent node "
+                                   "and letting you preview the full video before that "
+                                   "file finishes writing."}),
             },
         }
 
@@ -335,7 +388,7 @@ class MiniMaxH3ContextStitcher:
 
     def stitch(self, folder, pattern, first_clip, last_clip, context_length, trim_mode, fps,
                video_vae=None, audio_vae=None, match_audio_tail=True,
-               normalize_audio_per_clip=True):
+               normalize_audio_per_clip=True, latent=None, use_live_latent=False):
         if video_vae is None:
             raise ValueError("Connect your MiniMax H3 video VAE to 'video_vae'.")
         if st_load is None:
@@ -343,7 +396,16 @@ class MiniMaxH3ContextStitcher:
 
         d = _resolve_folder(folder)
         files = _find_files(d, pattern, first_clip, last_clip)
-        _LOG.info("H3 archive stitcher: %d clip(s) selected from %s", len(files), d)
+        live_entry = None
+        if use_live_latent and latent is not None:
+            if files:
+                files = files[:-1]  # drop the presumed-duplicate on-disk file
+                live_index = files[-1][0] + 1 if files else int(first_clip)
+            else:
+                live_index = int(first_clip)
+            video_latent, audio_latent = _av_from_live_latent(latent)
+            live_entry = (live_index, None, video_latent, audio_latent)  # path=None marks it as live
+        log_.info("H3 archive stitcher: %d clip(s) selected from %s", len(files), d)
 
         image_parts = []
         audio_parts = []
@@ -359,10 +421,16 @@ class MiniMaxH3ContextStitcher:
         prev_tail_img = None
         prev_tail_wave = None
 
-        for pos, (idx, path) in enumerate(files):
-            video_latent, audio_latent = _load_archive(path)
-            _LOG.info("H3 archive stitcher: clip %05d latent video=%s audio=%s",
-                      idx, tuple(video_latent.shape), tuple(audio_latent.shape))
+        all_entries = [(idx, path, None, None) for idx, path in files]
+        if live_entry is not None:
+            all_entries.append(live_entry)
+
+        for pos, (idx, path, live_video, live_audio) in enumerate(all_entries):
+            if path is not None:
+                video_latent, audio_latent = _load_archive(path)
+            else:
+                video_latent, audio_latent = live_video, live_audio
+                log_.info("H3 archive stitcher: clip %05d taken from live latent input", idx)
 
             # Decode one clip at a time. The decoded result is immediately moved
             # to CPU, so a long chain does not keep every VAE result on VRAM.
@@ -375,7 +443,7 @@ class MiniMaxH3ContextStitcher:
             del audio_latent
 
             decoded_frames = int(images.shape[0])
-            is_last = pos == len(files) - 1
+            is_last = pos == len(all_entries) - 1
 
             if crossfade_active:
                 if decoded_frames < 2 * overlap:
@@ -510,7 +578,7 @@ class MiniMaxH3ContextStitcher:
              "" if final_audio is not None else " (no audio_vae connected)")
         )
         report = "\n".join(report_lines)
-        _LOG.info("H3 archive stitcher finished: %d frames (%.3fs), audio %.3fs",
+        log_.info("H3 archive stitcher finished: %d frames (%.3fs), audio %.3fs",
                   frame_count, video_seconds, audio_seconds)
 
         return (final_images, final_audio, frame_count, report)
