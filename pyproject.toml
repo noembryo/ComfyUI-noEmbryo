@@ -1,15 +1,16 @@
 [project]
 name = "comfyui-noembryo"
 description = """
-A collection of nodes for ComyUI.
-* "Load Image (from path)" is a node lets you load an image from any path in your computer, and also displays the image in the node.
-* "JsonPromptLoader" is a node that enhances a propt using a .json file with `item:prompt` pairs.
-* "Resolution Scale" is a node that resizes an image using pixels or scale factor.
-* "Regex Text Chopper" is a node that cuts text based on regex.
-* "Auto Save Workflow" can save the current workflow to a .json file automatically.
-* "PromptTermList (1-6)" nodes to help with the creation of Prompts.
+A collection of nodes for ComyUI.\n
+* "Load Image (from path)" is a node lets you load an image from any path in your computer, and also displays the image in the node.\n
+* "H3 Motion Context Clip Stitcher" is a node that concatenates H3 Motion Context clip archives.\n
+* "JsonPromptLoader" is a node that enhances a propt using a .json file with `item:prompt` pairs.\n
+* "Resolution Scale" is a node that resizes an image using pixels or scale factor.\n
+* "Regex Text Chopper" is a node that cuts text based on regex.\n
+* "PromptTermList (1-6)" nodes to help with the creation of Prompts.\n
+* "Auto Save Workflow" can save the current workflow to a .json file automatically.\n
 """
-version = "1.4.0"
+version = "1.5.0"
 license = {text = "MIT License"}
 
 [project.urls]

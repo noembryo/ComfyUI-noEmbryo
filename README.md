@@ -20,6 +20,7 @@ It can load `.json` files from any directory, not just the node's directory.
 For the custom text integration, there is a variable (can be specified by the user), that can be used in the item's prompt text to insert the custom text anywhere in the body of the prompt.  
 
 - **UI controls**
+  
   - **json_path** is the path to the `.json` file.  
       It can be an absolute path of your hard drive, or a relative path to the ComfyUI's installation directory.
   - **selected_item** selects one of the `.json` file's items (prompts).
@@ -57,6 +58,7 @@ A node lets you load an image from any path in your computer, either by pasting 
 It also displays the image in the node.  
 It's an enhanced version of the "[Load Image From Path (Enhanced)](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes#load-image-from-path-enhanced)" from [`ComfyUI_Ib_CustomNodes`](ComfyUI_Ib_CustomNodes).
 
+---
 ## Resolution Scale
 ![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
 A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
@@ -67,6 +69,40 @@ If there is an input image connected, setting either `width` or `height` to 0 wi
 ## Regex Text Chopper
 ![RegExChopper](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)
 A node that "chops" a text using a regular expression and outputs the chopped parts of the text. 
+
+---
+## H3 Motion Context Clip Stitcher
+
+![H3MotionContextClipStitcher](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/H3MotionContextClipStitcher.png)
+
+Final assembly for [NikoDemon80's H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context) AV clip archives.
+
+It loads numbered h3_motion_context_av_v1 files (clip_xx.safetensors), decodes one clip at a time to avoid memory peaks, dissolves the overlap between adjacent clips (video + synchronized audio), and concatenates them to a final video and audio stream.
+No quality loss, like when trying to concatenate encoded videos.
+
+- **Inputs**
+  - Video VAE
+  - Audio VAE
+  - (Optional), the current generated AV latent to be added as the last part of the stitching
+
+- **Controls**
+
+  - **folder** is the folder containing clip_00001.safetensors, clip_00002.safetensors, etc.
+    Absolute paths and paths relative to ComfyUI/output are accepted.
+  - **pattern** is the filename glob. The final five-digit number is treated as the clip index.
+  - **first_clip**is the first approved clip to include.
+  - **last_clip** is the last clip to include. 0 = every clip from first_clip onward.
+  - **context_length** is the number of decoded frames to crossfade at each clip boundary.
+    Keep the same number here as in the H3 Motion Context nodes.
+    The normal setting is 22 frames. This is the overlap length that is dissolved between adjacent clips.
+    5, 22, 39 or 56 are the lengths that are a whole number of latent steps, which is why other numbers aren't offered.
+  - **fps**  is the H3 native output rate. Keep this at 24 unless your workflow deliberately changes it.
+- **Outputs**
+  - **images**: The final stitched image stream to be saved
+  - **audio**: The final audio stream to be saved
+  - **frame_count**: The total number of frames
+  - **report**: Logging of some of the node's actions
+
 
 ---
 ## Auto Save Workflow

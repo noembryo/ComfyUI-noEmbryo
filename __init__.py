@@ -26,6 +26,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {}
 node_list = [
     "nodes",
     # "load_image_from_path",
+    # "stitcher",
 ]
 
 for module_name in node_list:

@@ -1,16 +1,14 @@
-"""MiniMax H3 Motion Context archive stitcher for ComfyUI.
+"""H3 Motion Context clip stitcher for ComfyUI.
 
-Loads NikoDemon80/ComfyUI-H3-Motion-Context v0.3.x archive files
-(h3_motion_context_av_v1), decodes each approved clip once, removes the
-carried Motion Context head from clips after the first, and concatenates the
-remaining picture/audio into one IMAGE + AUDIO pair.
+Loads NikoDemon80/ComfyUI-H3-Motion-Context clip archive files (h3_motion_context_av_v1),
+decodes each approved clip once, crossfades the carried Motion Context head from
+clips, and concatenates the picture/audio into one IMAGE + AUDIO pair.
 
-This intentionally does NOT reconstruct a NestedTensor and feed the saved
-files back into Motion Context. The archive format is the sampler output,
-and this node is a final-media assembly tool.
+This intentionally does NOT reconstruct a NestedTensor and feed the saved files back
+into Motion Context.
+The archive format is the sampler output, and this node is a final-media assembly tool.
 """
 
-import fnmatch
 import glob
 import logging
 import os
@@ -18,7 +16,6 @@ import re
 
 import torch
 import torch.nn.functional as F
-
 import folder_paths
 
 try:
@@ -34,9 +31,6 @@ except Exception:
 log_ = logging.getLogger("h3_motion_context_archive")
 
 
-INDEX_RE = re.compile(r"(?:^|_)(\d{5})(?:\.safetensors)$", re.IGNORECASE)
-
-
 def _resolve_folder(path):
     p = (path or "").strip().strip('"').strip("'")
     if not p:
@@ -45,16 +39,16 @@ def _resolve_folder(path):
     for c in candidates:
         if os.path.isdir(c):
             return os.path.abspath(c)
-    raise FileNotFoundError(
-        "H3 Motion Context Archive Stitcher: folder not found: %s\n"
-        "You can use an absolute path or a path relative to ComfyUI's output folder."
-        % p
-    )
+    raise FileNotFoundError("H3 Motion Context Clip Stitcher: folder not found: %s\n"
+                            "You can use an absolute path or a path relative to "
+                            "ComfyUI's output folder." % p)
 
 
 def _clip_number(path):
     name = os.path.basename(path)
-    m = INDEX_RE.search(name)
+    # noinspection RegExpUnnecessaryNonCapturingGroup
+    pat = re.compile(r"(?:^|_)(\d{5})(?:\.safetensors)$", re.IGNORECASE)
+    m = pat.search(name)
     return int(m.group(1)) if m else -1
 
 
@@ -71,15 +65,14 @@ def _find_files(folder, pattern, first_clip, last_clip):
             continue
         if idx < int(first_clip):
             continue
-        if int(last_clip) > 0 and idx > int(last_clip):
+        if 0 < int(last_clip) < idx:
             continue
         paths.append((idx, p))
     paths.sort(key=lambda x: x[0])
     if not paths:
-        raise FileNotFoundError(
-            "H3 Motion Context Archive Stitcher: no numbered .safetensors files "
-            "matched '%s' in %s." % (pattern, folder)
-        )
+        raise FileNotFoundError("H3 Motion Context Clip Stitcher: "
+                                "no numbered .safetensors files matched '%s' in %s."
+                                % (pattern, folder))
 
     # Do not silently skip a missing numbered clip. A gap usually means an
     # approved clip was not saved, and silently stitching around it would make
@@ -87,109 +80,60 @@ def _find_files(folder, pattern, first_clip, last_clip):
     expected = paths[0][0]
     for idx, _ in paths:
         if idx != expected:
-            raise ValueError(
-                "H3 Motion Context Archive Stitcher: missing clip %05d between "
-                "the selected archive files." % expected
-            )
+            raise ValueError("H3 Motion Context Clip Stitcher: missing clip %05d between "
+                             "the selected archive files." % expected)
         expected += 1
     return paths
 
 
 def _load_archive(path):
     if st_load is None:
-        raise RuntimeError(
-            "safetensors is unavailable in this ComfyUI Python environment."
-        )
+        raise RuntimeError("safetensors is unavailable in this "
+                           "ComfyUI Python environment.")
+    # noinspection PyCallingNonCallable
     data = st_load(path, device="cpu")
     if "video" not in data or "audio" not in data:
-        raise ValueError(
-            "%s is not an h3_motion_context_av_v1 archive: expected 'video' and 'audio'."
-            % path
-        )
+        raise ValueError("%s is not an h3_motion_context_av_v1 archive: "
+                         "expected 'video' and 'audio'." % path)
     video = data["video"]
     audio = data["audio"]
     if video.ndim != 5:
-        raise ValueError("%s: expected video [B,C,T,H,W], got %s" % (path, tuple(video.shape)))
+        raise ValueError("%s: expected video [B,C,T,H,W], got %s"
+                         % (path, tuple(video.shape)))
     if audio.ndim != 4:
-        raise ValueError("%s: expected audio [B,C,2,T], got %s" % (path, tuple(audio.shape)))
+        raise ValueError("%s: expected audio [B,C,2,T], got %s"
+                         % (path, tuple(audio.shape)))
     if video.shape[0] != 1 or audio.shape[0] != 1:
         raise ValueError("%s: only batch size 1 archive clips are supported." % path)
     return video, audio
 
 
 def _decode_video(vae, video_latent):
-    """Decode the H3 video stream and normalize to ComfyUI IMAGE format."""
+    """ Decode the H3 video stream and normalize to ComfyUI IMAGE format.
+    """
     images = vae.decode(video_latent)
     # H3's VAE normally returns [B,T,H,W,C]. Some VAE implementations can
     # return [T,H,W,C], so accept both.
     if images.ndim == 5:
         images = images.reshape(-1, *images.shape[-3:])
     elif images.ndim != 4:
-        raise RuntimeError("H3 video VAE returned unexpected shape %s" % (tuple(images.shape),))
+        raise RuntimeError("H3 video VAE returned unexpected shape %s"
+                           % (tuple(images.shape),))
     return images.to(torch.float32).clamp(0, 1).cpu()
 
 
-def _decode_audio(audio_vae, audio_latent, normalize=True):
-    """Decode the H3 audio stream using the same convention as ComfyUI's VAEDecodeAudio."""
+def _decode_audio(audio_vae, audio_latent):
+    """ Decode the H3 audio stream using the same convention as ComfyUI's VAEDecodeAudio.
+    """
     audio = audio_vae.decode(audio_latent)
     # Current ComfyUI audio VAE returns [B,L,C]. Convert to [B,C,L].
     if audio.ndim != 3:
-        raise RuntimeError("H3 audio VAE returned unexpected shape %s" % (tuple(audio.shape),))
+        raise RuntimeError(
+            "H3 audio VAE returned unexpected shape %s" % (tuple(audio.shape),))
     audio = audio.movedim(-1, 1)
-    if normalize:
-        std = torch.std(audio, dim=[1, 2], keepdim=True) * 5.0
-        std[std < 1.0] = 1.0
-        audio = audio / std
     sr = int(getattr(audio_vae, "audio_sample_rate_output",
                      getattr(audio_vae, "audio_sample_rate", 32000)))
     return {"waveform": audio.to(torch.float32).cpu(), "sample_rate": sr}
-
-
-def _trim_clip(images, audio, trim_frames, fps, match_tail, trim_mode):
-    """Trim a Motion Context overlap from the requested side of a decoded clip."""
-    n = int(trim_frames)
-    if n <= 0:
-        return images, audio
-    total = int(images.shape[0])
-    if n >= total:
-        raise ValueError(
-            "Cannot trim %d frames from a decoded clip containing %d frames."
-            % (n, total)
-        )
-
-    if trim_mode == "TRIM_BACK":
-        out_images = images[:-n]
-    else:
-        out_images = images[n:]
-
-    if audio is None:
-        return out_images, None
-
-    waveform = audio["waveform"]
-    sr = int(audio["sample_rate"])
-    cut = int(round((n / float(fps)) * sr))
-    if cut >= waveform.shape[-1]:
-        raise ValueError(
-            "Audio is too short to remove the %d-frame (%0.4fs) Motion Context "
-            "%s." % (n, n / float(fps),
-                      "tail" if trim_mode == "TRIM_BACK" else "head")
-        )
-
-    if trim_mode == "TRIM_BACK":
-        waveform = waveform[..., :-cut]
-    else:
-        waveform = waveform[..., cut:]
-
-    if match_tail:
-        frames_left = total - n
-        want = int(round(frames_left / float(fps) * sr))
-        have = int(waveform.shape[-1])
-        if have > want:
-            waveform = waveform[..., :want]
-        elif have < want:
-            waveform = F.pad(waveform, (0, want - have))
-
-    return out_images, {"waveform": waveform, "sample_rate": sr}
 
 
 def _resample_audio(audio, target_sr):
@@ -199,17 +143,16 @@ def _resample_audio(audio, target_sr):
     if sr == int(target_sr):
         return audio
     if torchaudio is None:
-        raise RuntimeError(
-            "Audio sample rates differ (%d vs %d), but torchaudio is unavailable "
-            "to resample them." % (sr, int(target_sr))
-        )
+        raise RuntimeError("Audio sample rates differ (%d vs %d), but torchaudio is "
+                           "unavailable to resample them." % (sr, int(target_sr)))
+    # noinspection PyUnresolvedReferences
     waveform = torchaudio.functional.resample(audio["waveform"], sr, int(target_sr))
     return {"waveform": waveform, "sample_rate": int(target_sr)}
 
 
 def _crossfade_boundary(prev_tail_images, cur_images, prev_tail_wave, cur_wave,
                         overlap_frames, cross_samples):
-    """Crossfade the previous clip's tail with the current clip's head.
+    """ Crossfade the previous clip's tail with the current clip's head.
 
     prev_tail_images: [L,H,W,C]  cur_images: [T,H,W,C]
     prev_tail_wave  : [1,C,Ls]   cur_wave: [1,C,Cs]  (or None)
@@ -236,8 +179,7 @@ def _crossfade_boundary(prev_tail_images, cur_images, prev_tail_wave, cur_wave,
             blend_wave = prev_tail_wave
         else:
             n = min(n, int(prev_tail_wave.shape[-1]), int(cur_wave.shape[-1]))
-            theta = torch.linspace(0.0, 1.5707963267948966, n,
-                                   dtype=prev_tail_wave.dtype,
+            theta = torch.linspace(0.0, 1.5707963267948966, n, dtype=prev_tail_wave.dtype,
                                    device=prev_tail_wave.device).view(1, 1, n)
             blend_wave = (prev_tail_wave[..., :n] * torch.cos(theta)
                           + cur_wave[..., :n] * torch.sin(theta))
@@ -245,192 +187,143 @@ def _crossfade_boundary(prev_tail_images, cur_images, prev_tail_wave, cur_wave,
 
 
 def _av_from_live_latent(latent):
-    """Extract (video, audio) tensors from an in-memory H3 sampler LATENT,
-    matching the layout _load_archive() returns from a saved archive.
-
-    NOTE: verify this against your installed Motion Context version before
-    relying on it -- run the debug snippet in the comment below once to
-    confirm the real attribute/key names, then adjust this function.
+    """ Extract (video, audio) tensors from an in-memory H3 AV LATENT,
+    using the same unpacking convention as NikoDemon80's own
+    _streams_from_latent()/save(): latent["samples"] is a NestedTensor
+    (or tuple/list) whose unbind() gives (video, audio) in that order.
     """
-    # --- Debug helper: uncomment once to inspect the real object ---
-    # _LOG.warning("LIVE LATENT DEBUG: type=%s repr=%s",
-    #              type(latent),
-    #              getattr(latent, "__dict__", None) or
-    #              (latent.keys() if isinstance(latent, dict) else dir(latent)))
-
-    # Case 1: plain dict, e.g. {"samples": video_t, "audio_samples": audio_t}
-    if isinstance(latent, dict):
-        log_.info("1. dict")
-        video = latent.get("samples") or latent.get("video")
-        audio = latent.get("audio_samples") or latent.get("audio")
-        if video is not None and audio is not None:
-            return video, audio
-
-    # Case 2: object with .video / .audio attributes (NestedTensor-style)
-    if hasattr(latent, "video") and hasattr(latent, "audio"):
-        log_.info("2. video/audio")
-        return latent.video, latent.audio
-
-    # Case 3: tuple/list of two tensors (video, audio)
-    if isinstance(latent, (tuple, list)) and len(latent) == 2:
-        log_.info("3. tuple/list")
-        return latent[0], latent[1]
-    log_.info("4. unknown")
-
-    raise ValueError(
-        "Could not extract video/audio from the connected live latent "
-        "(type=%s). Uncomment the debug line above, run once, check the "
-        "console output, and adjust _av_from_live_latent() accordingly."
-        % type(latent)
-    )
+    if not isinstance(latent, dict) or "samples" not in latent:
+        raise ValueError("h3_motion_context: expected a MiniMax H3 AV latent dict with "
+                         "a 'samples' key, got %r" % type(latent))
+    samples = latent["samples"]
+    if hasattr(samples, "unbind"):
+        parts = list(samples.unbind())
+    elif isinstance(samples, (tuple, list)):
+        parts = list(samples)
+    else:
+        raise ValueError("h3_motion_context: expected a MiniMax H3 AV latent (a nested "
+                         "video/audio pair), got %r" % type(samples))
+    if len(parts) < 2:
+        raise ValueError("h3_motion_context: latent has no audio stream; wire the "
+                         "sampler output of an H3 AV graph.")
+    video = parts[0].cpu().contiguous()
+    audio = parts[1].cpu().contiguous()
+    return video, audio
 
 
-class MiniMaxH3ContextStitcher:
-    """Load, decode, trim, and concatenate approved H3 Motion Context clips."""
-
+class H3MotionContextClipStitcher:
+    """ Load, decode, and crossfade approved H3 Motion Context clips.
+    """
     @classmethod
     def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "folder": ("STRING", {
-                    "default": "h3_context",
-                    "tooltip": "Folder containing clip_00001.safetensors, clip_00002.safetensors, etc. "
-                               "Absolute paths and paths relative to ComfyUI/output are accepted."
-                }),
-                "pattern": ("STRING", {
-                    "default": "clip_*.safetensors",
-                    "tooltip": "Filename glob. The final five-digit number is treated as the clip index."
-                }),
-                "first_clip": ("INT", {
-                    "default": 1, "min": 1, "max": 9999,
-                    "tooltip": "First approved clip to include."
-                }),
-                "last_clip": ("INT", {
-                    "default": 0, "min": 0, "max": 9999,
-                    "tooltip": "Last clip to include. 0 = every clip from first_clip onward."
-                }),
-                "context_length": ("INT", {
-                    "default": 22, "min": 0, "max": 4096,
-                    "tooltip": "Number of decoded frames to remove at each clip boundary. "
-                               "For NikoDemon80 v0.3.1 the normal setting is 22 frames. "
-                               "In CROSSFADE mode this is the overlap length that is dissolved "
-                               "between adjacent clips instead of being removed."
-                }),
-                "trim_mode": (["TRIM_FRONT", "TRIM_BACK", "CROSSFADE"], {
-                    "default": "TRIM_FRONT",
-                    "tooltip": "TRIM_FRONT: remove the first context_length frames from clips 2..N.\n"
-                               "TRIM_BACK: remove the last context_length frames from clips 1..N-1.\n"
-                               "CROSSFADE: keep the context_length overlap and dissolve it between "
-                               "adjacent clips (video + synchronized audio) instead of removing it."
-                }),
-                "fps": ("FLOAT", {
-                    "default": 24.0, "min": 1.0, "max": 240.0, "step": 0.001,
-                    "tooltip": "H3 native output rate. Keep this at 24 unless your workflow deliberately changes it."
-                }),
-            },
-            "optional": {
-                "video_vae": ("VAE", {
-                    "tooltip": "MiniMax H3 video VAE (FP16 or INT8 ConvRot)."
-                }),
+        return {"required": {"folder": ("STRING", {"default": "h3_context",
+            "tooltip": "Folder containing clip_00001.safetensors, "
+                       "clip_00002.safetensors, etc.\nAbsolute paths and paths relative "
+                       "to ComfyUI/output are accepted."}),
+            "pattern": ("STRING", {"default": "clip_*.safetensors",
+                "tooltip": "Filename glob. The final five-digit number is treated as "
+                           "the clip index."}),
+            "first_clip": ("INT", {"default": 1, "min": 1, "max": 9999,
+                "tooltip": "First approved clip to include."}),
+             "last_clip": ("INT", {"default": 0, "min": 0, "max": 9999,
+                "tooltip": "Last clip to include. 0 = every clip from first_clip onward."}),
+            "context_length": (["5", "22", "39", "56"], {"default": "22",
+                "tooltip": "Number of decoded frames to crossfade at each clip boundary. "
+                           "The normal setting is 22 frames.\n"
+                           "This is the overlap length that is dissolved between "
+                           "adjacent clips.\n"
+                           "5, 22, 39 or 56 are the lengths that are a whole number of "
+                           "latent steps, which is why other numbers aren't offered."}),
+            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.001,
+                "tooltip": "H3 native output rate. Keep this at 24 unless your workflow "
+                           "deliberately changes it."}), },
+            "optional": {"video_vae": ("VAE", {"tooltip": "MiniMax H3 video VAE "
+                                                          "(FP16 or INT8 ConvRot)."}),
                 "audio_vae": ("VAE", {
-                    "tooltip": "MiniMax H3 audio VAE FP32. Required for the AUDIO output."
-                }),
-                "match_audio_tail": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "After removing the context head, force each remaining audio chunk to exactly "
-                               "match its remaining picture duration. This follows NikoDemon80 v0.3.1's Trim node. "
-                               "Ignored in CROSSFADE mode (no head/tail is removed)."
-                }),
-                "normalize_audio_per_clip": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Use ComfyUI's standard VAEDecodeAudio per-clip normalization. Disable if you want "
-                               "raw VAE waveform levels before concatenation."
-                }),
+                    "tooltip": "MiniMax H3 audio VAE FP32. Required for the AUDIO "
+                               "output."}),
                 "latent": ("LATENT", {
                     "tooltip": "Optional: the currently-generated AV latent (from your "
                                "H3 sampler), used in place of the highest-numbered file "
-                               "on disk. Requires use_live_latent to be enabled."}),
-                    "use_live_latent": ("BOOLEAN", {
-                        "default": False,
-                        "tooltip": "If enabled and 'latent' is connected, the "
-                                   "highest-indexed clip file on disk is skipped and "
-                                   "replaced with the live latent input instead -- "
-                                   "avoiding a race with the parallel SaveLatent node "
-                                   "and letting you preview the full video before that "
-                                   "file finishes writing."}),
-            },
-        }
+                               "on disk."}),
+                         },
+                }
 
     RETURN_TYPES = ("IMAGE", "AUDIO", "INT", "STRING")
     RETURN_NAMES = ("images", "audio", "frame_count", "report")
     FUNCTION = "stitch"
     CATEGORY = "video/minimax"
-    DESCRIPTION = ("Final assembly for NikoDemon80 H3 Motion Context AV archives. "
+    DESCRIPTION = ("Final assembly for NikoDemon80's H3 Motion Context AV clip archives.\n"
                    "Loads numbered h3_motion_context_av_v1 files, decodes one clip at a "
-                   "time, removes the carried context from the selected side of each "
-                   "clip boundary, synchronizes audio, and concatenates.\n"
-                   "CROSSFADE mode dissolves the overlap between adjacent clips (video "
-                   "+ synchronized audio) instead of removing it.")
+                   "time, dissolves the overlap between adjacent clips (video + synchronized audio), "
+                   "and concatenates them to a final video and audio stream.")
 
+    # noinspection PyUnusedLocal
     @classmethod
-    def IS_CHANGED(cls, folder, pattern, first_clip, last_clip, context_length, trim_mode, fps,
-                   video_vae=None, audio_vae=None, match_audio_tail=True,
-                   normalize_audio_per_clip=True):
+    def IS_CHANGED(cls, folder, pattern, first_clip, last_clip, context_length, fps,
+                   video_vae=None, audio_vae=None,):
+        # noinspection PyBroadException
         try:
             d = _resolve_folder(folder)
             files = _find_files(d, pattern, first_clip, last_clip)
-            return tuple((p, os.stat(p).st_mtime_ns, os.path.getsize(p)) for _, p in files) + (
-                int(context_length), str(trim_mode), float(fps), bool(match_audio_tail),
-                bool(normalize_audio_per_clip),
-            )
+            # noinspection PyTypeChecker
+            return tuple((p, os.stat(p).st_mtime_ns, os.path.getsize(p))
+                         for _, p in files) + (int(context_length), float(fps),)
         except Exception:
             return float("NaN")
 
-    def stitch(self, folder, pattern, first_clip, last_clip, context_length, trim_mode, fps,
-               video_vae=None, audio_vae=None, match_audio_tail=True,
-               normalize_audio_per_clip=True, latent=None, use_live_latent=False):
+    @staticmethod
+    def stitch(folder, pattern, first_clip, last_clip, context_length, fps,
+               video_vae=None, audio_vae=None, latent=None,):
         if video_vae is None:
             raise ValueError("Connect your MiniMax H3 video VAE to 'video_vae'.")
         if st_load is None:
-            raise RuntimeError("safetensors is not available in this ComfyUI environment.")
+            raise RuntimeError(
+                "safetensors is not available in this ComfyUI environment.")
 
         d = _resolve_folder(folder)
         files = _find_files(d, pattern, first_clip, last_clip)
         live_entry = None
-        if use_live_latent and latent is not None:
+
+        if latent is not None:
             if files:
                 files = files[:-1]  # drop the presumed-duplicate on-disk file
                 live_index = files[-1][0] + 1 if files else int(first_clip)
             else:
                 live_index = int(first_clip)
             video_latent, audio_latent = _av_from_live_latent(latent)
-            live_entry = (live_index, None, video_latent, audio_latent)  # path=None marks it as live
-        log_.info("H3 archive stitcher: %d clip(s) selected from %s", len(files), d)
+            live_entry = (
+            live_index, None, video_latent, audio_latent)  # path=None marks it as live
 
         image_parts = []
         audio_parts = []
         report_lines = []
         target_sr = None
 
-        is_crossfade = trim_mode == "CROSSFADE"
         overlap = int(context_length)
-        # Degenerate crossfade (no overlap or a single clip) falls back to a
-        # plain concatenation, which is exactly what the trim modes would do.
-        crossfade_active = is_crossfade and overlap > 0 and len(files) > 1
 
         prev_tail_img = None
         prev_tail_wave = None
 
         all_entries = [(idx, path, None, None) for idx, path in files]
         if live_entry is not None:
+            # noinspection PyTypeChecker
             all_entries.append(live_entry)
+
+        total_count = len(files) + (1 if live_entry is not None else 0)
+        log_.info("H3 archive stitcher: %d clip(s) selected from %s", total_count, d)
+
+        # Degenerate crossfade (no overlap or a single clip) falls back to a
+        # plain concatenation, which is exactly what the trim modes would do.
+        crossfade_active = overlap > 0 and len(all_entries) > 1
 
         for pos, (idx, path, live_video, live_audio) in enumerate(all_entries):
             if path is not None:
                 video_latent, audio_latent = _load_archive(path)
             else:
                 video_latent, audio_latent = live_video, live_audio
-                log_.info("H3 archive stitcher: clip %05d taken from live latent input", idx)
+                log_.info("H3 archive stitcher: clip %05d taken from live latent input",
+                          idx)
 
             # Decode one clip at a time. The decoded result is immediately moved
             # to CPU, so a long chain does not keep every VAE result on VRAM.
@@ -439,7 +332,9 @@ class MiniMaxH3ContextStitcher:
 
             audio = None
             if audio_vae is not None:
-                audio = _decode_audio(audio_vae, audio_latent, normalize=normalize_audio_per_clip)
+                audio = _decode_audio(audio_vae, audio_latent,
+                                      # normalize=normalize_audio_per_clip
+                                      )
             del audio_latent
 
             decoded_frames = int(images.shape[0])
@@ -447,10 +342,9 @@ class MiniMaxH3ContextStitcher:
 
             if crossfade_active:
                 if decoded_frames < 2 * overlap:
-                    raise ValueError(
-                        "CROSSFADE requires each clip to have at least 2*context_length "
-                        "(%d) frames; clip %05d has %d." % (overlap, idx, decoded_frames)
-                    )
+                    raise ValueError("Crossfade requires each clip to have at least "
+                                     "2*context_length (%d) frames; clip %05d has %d."
+                                     % (overlap, idx, decoded_frames))
 
                 # Resample this clip's audio to the shared target rate before
                 # splitting, so the head/tail sample counts line up across clips.
@@ -468,10 +362,9 @@ class MiniMaxH3ContextStitcher:
                     if n <= 0:
                         n = 1
                     if n >= audio["waveform"].shape[-1]:
-                        raise ValueError(
-                            "Audio is too short to extract a %d-frame (%0.4fs) "
-                            "crossfade head/tail for clip %05d." % (overlap, overlap / float(fps), idx)
-                        )
+                        raise ValueError("Audio is too short to extract a %d-frame "
+                                         "(%0.4fs) crossfade head/tail for clip %05d."
+                                         % (overlap, overlap / float(fps), idx))
 
                 head_img = images[:overlap]
                 body_img = images[overlap:-overlap]
@@ -486,21 +379,18 @@ class MiniMaxH3ContextStitcher:
                     tail_wave = {"waveform": wave[..., -n:], "sample_rate": sr}
 
                 if pos == 0:
-                    # First clip: emit head+body raw, buffer the tail for the
-                    # next boundary.
+                    # First clip: emit head+body raw, buffer the tail for the next boundary.
                     image_parts.append(torch.cat([head_img, body_img], dim=0))
                     if audio is not None:
-                        audio_parts.append(torch.cat(
-                            [head_wave["waveform"], body_wave["waveform"]], dim=-1))
+                        audio_parts.append(torch.cat([head_wave["waveform"],
+                                                      body_wave["waveform"]], dim=-1))
                     prev_tail_img = tail_img
                     prev_tail_wave = tail_wave
                 else:
-                    blend_img, blend_wave = _crossfade_boundary(
-                        prev_tail_img, images,
-                        prev_tail_wave["waveform"] if prev_tail_wave is not None else None,
-                        audio["waveform"] if audio is not None else None,
-                        overlap, n
-                    )
+                    blend_img, blend_wave = _crossfade_boundary(prev_tail_img, images,
+                        prev_tail_wave[
+                            "waveform"] if prev_tail_wave is not None else None,
+                        audio["waveform"] if audio is not None else None, overlap, n)
                     image_parts.append(blend_img)
                     if audio is not None:
                         audio_parts.append(blend_wave)
@@ -516,47 +406,15 @@ class MiniMaxH3ContextStitcher:
                         prev_tail_wave = tail_wave
 
                 kept_frames = decoded_frames - (overlap if not is_last else 0)
-                audio_sec = 0.0 if audio is None else audio["waveform"].shape[-1] / float(audio["sample_rate"])
-                report_lines.append(
-                    "clip_%05d: decoded=%d frames, crossfade=%d frames (%.4fs), kept=%d, audio=%.4fs" %
-                    (idx, decoded_frames, overlap, overlap / float(fps), kept_frames, audio_sec)
-                )
-
+                audio_sec = (0.0 if audio is None else
+                             audio["waveform"].shape[-1] / float(audio["sample_rate"]))
+                report_lines.append("clip_%05d: decoded=%d frames, crossfade=%d frames "
+                                    "(%.4fs), kept=%d, audio=%.4fs"
+                                    % (idx, decoded_frames, overlap, overlap / float(fps),
+                                       kept_frames, audio_sec))
                 del images
                 if audio is not None:
                     del audio
-                continue
-
-            # --- TRIM_FRONT / TRIM_BACK path ---
-            if trim_mode == "TRIM_FRONT":
-                # Preserve the first clip; remove the carried context head from clips 2..N.
-                should_trim = pos > 0
-            else:
-                # Preserve the final clip; remove the trailing context from clips 1..N-1.
-                should_trim = pos < len(files) - 1
-            trim = int(context_length) if should_trim else 0
-            images, audio = _trim_clip(
-                images, audio, trim, fps, match_audio_tail, trim_mode
-            )
-
-            image_parts.append(images)
-            if audio is not None:
-                if target_sr is None:
-                    target_sr = int(audio["sample_rate"])
-                audio = _resample_audio(audio, target_sr)
-                audio_parts.append(audio["waveform"])
-
-            kept_frames = int(images.shape[0])
-            audio_sec = 0.0 if audio is None else audio["waveform"].shape[-1] / float(audio["sample_rate"])
-            report_lines.append(
-                "clip_%05d: decoded=%d frames, trimmed=%d, kept=%d, audio=%.4fs" %
-                (idx, decoded_frames, trim, kept_frames, audio_sec)
-            )
-
-            # Explicitly drop local references before the next VAE decode.
-            del images
-            if audio is not None:
-                del audio
 
         final_images = torch.cat(image_parts, dim=0).contiguous()
         del image_parts
@@ -569,25 +427,22 @@ class MiniMaxH3ContextStitcher:
 
         frame_count = int(final_images.shape[0])
         video_seconds = frame_count / float(fps)
-        audio_seconds = (final_audio["waveform"].shape[-1] / float(final_audio["sample_rate"])
-                         if final_audio is not None else 0.0)
+        audio_seconds = (final_audio["waveform"].shape[-1] / float(
+            final_audio["sample_rate"]) if final_audio is not None else 0.0)
 
-        report_lines.append(
-            "TOTAL: %d frames = %.4fs at %.3f fps; audio=%.4fs%s" %
-            (frame_count, video_seconds, float(fps), audio_seconds,
-             "" if final_audio is not None else " (no audio_vae connected)")
-        )
+        report_lines.append("TOTAL: %d frames = %.4fs at %.3f fps; audio=%.4fs%s"
+                            % (frame_count, video_seconds, float(fps), audio_seconds,
+                               "" if final_audio is not None
+                               else " (no audio_vae connected)"))
         report = "\n".join(report_lines)
         log_.info("H3 archive stitcher finished: %d frames (%.3fs), audio %.3fs",
                   frame_count, video_seconds, audio_seconds)
 
-        return (final_images, final_audio, frame_count, report)
+        return final_images, final_audio, frame_count, report
 
 
 NODE_CLASS_MAPPINGS = {
-    "MiniMaxH3MotionContextArchiveStitcher": MiniMaxH3ContextStitcher,
-}
+    "H3MotionContextClipStitcher": H3MotionContextClipStitcher, }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "MiniMaxH3MotionContextArchiveStitcher": "MiniMax H3 Motion Context Archive Stitcher",
-}
+    "H3MotionContextClipStitcher": "H3 Motion Context Clip Stitcher", }
