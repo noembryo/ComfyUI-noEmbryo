@@ -91,6 +91,30 @@ def _pil_to_image_mask(img: 'Image.Image | Iterable[Image.Image]',
             output_mask[:] = [output_masks[0]]
 
 
+def _parse_crop(crop, width, height):
+    """Return (x0, y0, x1, y1) pixel box, or None for full image.
+    Crop is JSON with normalized coords: {"x","y","w","h"} in 0..1.
+    Empty / invalid crop means no crop.
+    """
+    if not crop:
+        return None
+    try:
+        data = json.loads(crop)
+        x = float(data["x"])
+        y = float(data["y"])
+        w = float(data["w"])
+        h = float(data["h"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    x0 = max(0, min(width - 1, round(x * width)))
+    y0 = max(0, min(height - 1, round(y * height)))
+    x1 = max(x0 + 1, min(width, round((x + w) * width)))
+    y1 = max(y0 + 1, min(height, round((y + h) * height)))
+    if x0 == 0 and y0 == 0 and x1 == width and y1 == height:
+        return None
+    return (x0, y0, x1, y1)
+
+
 class LoadImageFromPath:
     @classmethod
     def INPUT_TYPES(cls):
@@ -162,19 +186,40 @@ _clipspace_mappings = {}  # Maps expected filename -> actual filename
 class LoadImageFromPathEnhanced(LoadImageFromPath):
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"image": ("STRING", {"default": ""})}, }
+        return {
+            "required": {
+                "image": ("STRING", {
+                    "default": "",
+                    "tooltip": "Absolute path, or relative with [input]/[output]/[temp]. Use Browse to pick a file.",
+                }),
+                "crop": ("STRING", {
+                    "default": "",
+                    "tooltip": "Managed by the crop editor on the node — no need to edit by hand.",
+                }),
+            },
+        }
 
     CATEGORY = "image"
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("IMAGE", "MASK", "path")
     FUNCTION = "load_image_enhanced"
+    DESCRIPTION = ("Load an image from any path (paste or Browse). Drag on the preview to"
+                   " crop; drag inside to move; drag corners to resize; click outside the"
+                   " selection to clear. With no crop drawn, the full image is output.")
 
-    def load_image_enhanced(self, image):
+    def load_image_enhanced(self, image, crop=""):
         # Get the full path
         image_path = LoadImageFromPath._resolve_path(image)
 
         # Call the parent class's load_image method
         image_tensor, mask = super().load_image(image)
+
+        # Apply interactive crop (normalized coords from the frontend)
+        box = _parse_crop(crop, image_tensor.shape[2], image_tensor.shape[1])
+        if box is not None:
+            x0, y0, x1, y1 = box
+            image_tensor = image_tensor[:, y0:y1, x0:x1, :]
+            mask = mask[:, y0:y1, x0:x1]
 
         # Register this image in our cache for mask editor support
         filename = os.path.basename(str(image_path))
@@ -184,12 +229,24 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         # Return image, mask, AND the original input path string
         return image_tensor, mask, image
 
+    @classmethod
+    def IS_CHANGED(cls, image, crop=""):
+        image_path = LoadImageFromPath._resolve_path(image)
+        m = hashlib.sha256()
+        with open(image_path, 'rb') as f:
+            m.update(f.read())
+        m.update(str(crop).encode("utf-8"))
+        return m.digest().hex()
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, image, crop=""):
+        return LoadImageFromPath.VALIDATE_INPUTS(image)
+
 
 # Middleware to handle clipspace file resolution
 @web.middleware
 async def clipspace_resolver_middleware(request, handler):
-    """
-    Middleware to intercept /api/view requests and resolve clipspace filename mismatches.
+    """ Middleware to intercept /api/view requests and resolve clipspace filename mismatches.
     This fixes the issue where mask editor looks for 'clipspace-mask-X.png' but 
     the actual file is 'clipspace-painted-masked-X.png'
     """

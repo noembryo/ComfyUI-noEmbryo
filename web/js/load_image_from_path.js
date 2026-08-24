@@ -518,74 +518,523 @@ class FileBrowserDialog {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Interactive crop editor (adapted from obvpm/comfyui-obvpm, Apache-2.0)
+// No max_megapixels — crop only.
+// ---------------------------------------------------------------------------
+
+const MARGIN = 10;
+const HANDLE = 8;
+const MIN_SEL = 6;
+const MIN_EDITOR_H = 80;
+const RESIZE_ZONE = 15;
+const PREVIEW_TOOLTIP =
+    "Drag to crop · Drag inside to move · Drag corners to resize · Click outside selection to clear";
+
 app.registerExtension({
     name: "noEmbryo.LoadImageFromPath",
 
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name === "Load Image (from path) -noEmbryo") {
-            const onNodeCreated = nodeType.prototype.onNodeCreated;
+        if (nodeData.name !== "Load Image (from path) -noEmbryo") return;
 
-            nodeType.prototype.onNodeCreated = function () {
-                const result = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-                const node = this;
+        const onNodeCreated = nodeType.prototype.onNodeCreated;
 
-                // Add browse button
-                node.addWidget("button", "🔍 Browse...", null, () => {
-                    const pathWidget = node.widgets.find(w => w.name === "image");
-                    const currentPath = pathWidget ? pathWidget.value : '';
+        nodeType.prototype.onNodeCreated = function () {
+            const result = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+            const node = this;
 
-                    const browser = new FileBrowserDialog(currentPath);   // ← pass it here
-                    browser.show(async (filePath) => {
-                        const pathWidget = node.widgets.find(w => w.name === "image");
-                        if (pathWidget) {
-                            pathWidget.value = filePath;
+            const imageWidget = node.widgets.find((w) => w.name === "image");
+            const cropWidget = node.widgets.find((w) => w.name === "crop");
 
-                            // Load image using ComfyUI's proper system
-                            try {
-                                const filename = filePath.split(/[\\/]/).pop();
-                                const imgUrl = `/noembryo/serve_image?path=${encodeURIComponent(filePath)}&filename=${encodeURIComponent(filename)}`;
-                                const img = new Image();
+            // Hide the crop JSON widget (canvas + Nodes 2.0)
+            if (cropWidget) {
+                cropWidget.hidden = true;
+                cropWidget.options = cropWidget.options || {};
+                cropWidget.options.hidden = true;
+            }
 
-                                // Add cache busting to prevent cached issues
-                                img.src = imgUrl + '&t=' + Date.now();
+            const isVueMode = () =>
+                typeof LiteGraph !== "undefined" && !!LiteGraph.vueNodesMode;
+            const ui = () =>
+                isVueMode()
+                    ? { font: 13, row: 18, handle: 12 }
+                    : { font: 10, row: 14, handle: HANDLE };
 
-                                img.onload = () => {
-                                    // Ensure node.imgs exists and is properly set
-                                    if (!node.imgs) {
-                                        node.imgs = [];
-                                    }
-                                    node.imgs = [img];
-                                    node.imageIndex = 0;
+            // Suppress stock node.imgs preview so only the crop editor draws
+            Object.defineProperty(node, "imgs", {
+                get: () => undefined,
+                set: () => {},
+            });
 
-                                    // Force a more comprehensive refresh
-                                    app.graph.setDirtyCanvas(true, true);
+            const state = {
+                img: null,
+                rect: null, // normalized {x,y,w,h} or null = full image
+                drag: null,
+                box: null,
+            };
 
-                                    // Also trigger node refresh specifically
-                                    if (node.onDrawBackground) {
-                                        node.onDrawBackground();
-                                    }
+            try {
+                const saved = cropWidget?.value ? JSON.parse(cropWidget.value) : null;
+                if (saved && saved.w > 0 && saved.h > 0) state.rect = saved;
+            } catch (e) {
+                state.rect = null;
+            }
+
+            function syncCrop() {
+                if (!cropWidget) return;
+                let value = "";
+                if (state.rect && state.rect.w > 0.001 && state.rect.h > 0.001) {
+                    const r = state.rect;
+                    if (!(r.x < 0.002 && r.y < 0.002 && r.w > 0.996 && r.h > 0.996)) {
+                        value = JSON.stringify({
+                            x: +r.x.toFixed(4),
+                            y: +r.y.toFixed(4),
+                            w: +r.w.toFixed(4),
+                            h: +r.h.toFixed(4),
+                        });
+                    }
+                }
+                if (cropWidget.value !== value) {
+                    cropWidget.value = value;
+                }
+            }
+
+            function previewHeight(width) {
+                if (!state.img) return 100;
+                return Math.round(width * (state.img.height / state.img.width));
+            }
+
+            function cropDims() {
+                const iw = state.img.width;
+                const ih = state.img.height;
+                const r = state.rect;
+                const x0 = Math.max(0, Math.min(iw - 1, Math.round(r.x * iw)));
+                const y0 = Math.max(0, Math.min(ih - 1, Math.round(r.y * ih)));
+                const x1 = Math.max(x0 + 1, Math.min(iw, Math.round((r.x + r.w) * iw)));
+                const y1 = Math.max(y0 + 1, Math.min(ih, Math.round((r.y + r.h) * ih)));
+                return [x1 - x0, y1 - y0];
+            }
+
+            function hitTest(px, py) {
+                if (!state.rect || !state.box) return { mode: "new" };
+                const handle = ui().handle;
+                const { bx, by, bw, bh } = state.box;
+                const sx = bx + state.rect.x * bw;
+                const sy = by + state.rect.y * bh;
+                const sw = state.rect.w * bw;
+                const sh = state.rect.h * bh;
+                const corners = {
+                    nw: [sx, sy],
+                    ne: [sx + sw, sy],
+                    sw: [sx, sy + sh],
+                    se: [sx + sw, sy + sh],
+                };
+                for (const [name, [cx, cy]] of Object.entries(corners)) {
+                    if (Math.abs(px - cx) <= handle && Math.abs(py - cy) <= handle) {
+                        return { mode: "resize", corner: name };
+                    }
+                }
+                if (px >= sx && px <= sx + sw && py >= sy && py <= sy + sh) {
+                    return { mode: "move", offX: px - sx, offY: py - sy };
+                }
+                return { mode: "new" };
+            }
+
+            let allocHeight;
+
+            function boxHeight(widget, widgetY, fallback) {
+                if (isVueMode()) return fallback;
+                const nodeH = node.size?.[1];
+                const visible = node.widgets?.filter((w) => !w.hidden);
+                const isLast = !!visible && visible[visible.length - 1] === widget;
+                if (nodeH == null || widgetY == null || !isLast) return fallback;
+                return Math.max(MIN_EDITOR_H, nodeH - widgetY);
+            }
+
+            const editor = {
+                name: "crop_editor",
+                type: "noembryo_cropeditor",
+                value: "",
+                serialize: false,
+                options: { serialize: false },
+
+                // Do not lock height to the image aspect — keep the user's
+                // node size and letterbox the preview inside the allocated area.
+                computeLayoutSize: function (n) {
+                    return { minHeight: MIN_EDITOR_H, maxHeight: 100000, minWidth: 0 };
+                },
+
+                draw: function (ctx, _node, widgetWidth, y, H, lowQuality) {
+                    const u = ui();
+                    const h = boxHeight(this, y, allocHeight ?? H) - 8;
+                    const x = MARGIN;
+                    const nodeW = _node?.size?.[0];
+                    const effWidth =
+                        !isVueMode() && nodeW ? Math.min(widgetWidth, nodeW) : widgetWidth;
+                    state.lastDrawW = effWidth;
+                    const w = effWidth - MARGIN * 2;
+                    const imgAreaH = Math.max(1, h - u.row);
+
+                    ctx.save();
+
+                    if (!state.img) {
+                        ctx.fillStyle = "#00000033";
+                        ctx.fillRect(x, y, w, h);
+                        ctx.fillStyle = "#888";
+                        ctx.font = `${u.font + 2}px sans-serif`;
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText("no image", x + w / 2, y + h / 2);
+                        ctx.restore();
+                        return;
+                    }
+
+                    const scale = Math.min(w / state.img.width, imgAreaH / state.img.height);
+                    const bw = state.img.width * scale;
+                    const bh = state.img.height * scale;
+                    const bx = x + (w - bw) / 2;
+                    const by = y + (imgAreaH - bh) / 2;
+                    state.box = { bx, by, bw, bh };
+                    ctx.drawImage(state.img, bx, by, bw, bh);
+
+                    if (state.rect && !lowQuality) {
+                        const sx = bx + state.rect.x * bw;
+                        const sy = by + state.rect.y * bh;
+                        const sw = state.rect.w * bw;
+                        const sh = state.rect.h * bh;
+
+                        ctx.beginPath();
+                        ctx.rect(bx, by, bw, bh);
+                        ctx.rect(sx, sy, sw, sh);
+                        ctx.fillStyle = "rgba(0,0,0,0.55)";
+                        ctx.fill("evenodd");
+
+                        ctx.strokeStyle = "#4af";
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(sx, sy, sw, sh);
+                        ctx.fillStyle = "#4af";
+                        for (const [hx, hy] of [
+                            [sx, sy],
+                            [sx + sw, sy],
+                            [sx, sy + sh],
+                            [sx + sw, sy + sh],
+                        ]) {
+                            ctx.fillRect(hx - 2.5, hy - 2.5, 5, 5);
+                        }
+
+                        ctx.font = `${u.font}px sans-serif`;
+                        ctx.textAlign = "left";
+                        ctx.textBaseline = "alphabetic";
+                        const pillH = u.font + 2;
+                        const drawPill = (segments, ty) => {
+                            const widths = segments.map((s) => ctx.measureText(s[0]).width);
+                            const tw = widths.reduce((a, b) => a + b, 0);
+                            const tx = Math.max(
+                                bx,
+                                Math.min(sx + (sw - tw - 6) / 2, bx + bw - tw - 6)
+                            );
+                            ctx.fillStyle = "rgba(0,0,0,0.6)";
+                            ctx.fillRect(tx, ty - pillH + 3, tw + 6, pillH);
+                            let cx = tx + 3;
+                            for (const [i, [text, color]] of segments.entries()) {
+                                ctx.fillStyle = color;
+                                ctx.fillText(text, cx, ty);
+                                cx += widths[i];
+                            }
+                        };
+                        const [pw, ph] = cropDims();
+                        drawPill(
+                            [[`${pw} x ${ph}`, "#fff"]],
+                            sy > y + pillH + 2 ? sy - 3 : sy + pillH - 1
+                        );
+                    }
+
+                    if (!lowQuality) {
+                        const lg = typeof LiteGraph !== "undefined" ? LiteGraph : {};
+                        const textColor = lg.WIDGET_TEXT_COLOR || "#ddd";
+                        const MUTED_ALPHA = 0.45;
+                        const iw = state.img.width;
+                        const ih = state.img.height;
+                        const segments = [
+                            ["Full: ", true],
+                            [`${iw} x ${ih}`, false],
+                        ];
+                        ctx.font = `${u.font}px sans-serif`;
+                        ctx.textBaseline = "alphabetic";
+                        ctx.textAlign = "left";
+                        ctx.fillStyle = textColor;
+                        const ty = y + h - 3;
+                        const total = segments.reduce(
+                            (sum, s) => sum + ctx.measureText(s[0]).width,
+                            0
+                        );
+                        let cx = x + (w - total) / 2;
+                        const prevAlpha = ctx.globalAlpha;
+                        for (const [text, muted] of segments) {
+                            ctx.globalAlpha = muted ? prevAlpha * MUTED_ALPHA : prevAlpha;
+                            ctx.fillText(text, cx, ty);
+                            cx += ctx.measureText(text).width;
+                        }
+                        ctx.globalAlpha = prevAlpha;
+                    }
+
+                    ctx.restore();
+                },
+
+                mouse: function (event, pos, _node) {
+                    if (!state.img || !state.box) return false;
+                    const t = event.type;
+                    const px = pos[0];
+                    const py = pos[1];
+                    const { bx, by, bw, bh } = state.box;
+                    const clampX = (v) => Math.max(bx, Math.min(bx + bw, v));
+                    const clampY = (v) => Math.max(by, Math.min(by + bh, v));
+
+                    if (t === "pointerdown" || t === "mousedown") {
+                        if (px < bx || px > bx + bw || py < by || py > by + bh) {
+                            return false;
+                        }
+                        state.drag = {
+                            ...hitTest(px, py),
+                            startX: px,
+                            startY: py,
+                            moved: false,
+                        };
+                        const el = event.target;
+                        if (el?.style) {
+                            el.style.cursor =
+                                state.drag.mode === "move"
+                                    ? "grabbing"
+                                    : state.drag.mode === "resize"
+                                      ? state.drag.corner === "nw" ||
+                                        state.drag.corner === "se"
+                                          ? "nwse-resize"
+                                          : "nesw-resize"
+                                      : "crosshair";
+                        }
+                        this.triggerDraw?.();
+                        return true;
+                    }
+
+                    const drag = state.drag;
+                    if (!drag) return false;
+
+                    if (t === "pointermove" || t === "mousemove") {
+                        if (Math.abs(px - drag.startX) + Math.abs(py - drag.startY) > 2) {
+                            drag.moved = true;
+                        }
+                        if (drag.mode === "new") {
+                            const x0 = clampX(Math.min(drag.startX, px));
+                            const y0 = clampY(Math.min(drag.startY, py));
+                            const x1 = clampX(Math.max(drag.startX, px));
+                            const y1 = clampY(Math.max(drag.startY, py));
+                            if (x1 - x0 >= MIN_SEL && y1 - y0 >= MIN_SEL) {
+                                state.rect = {
+                                    x: (x0 - bx) / bw,
+                                    y: (y0 - by) / bh,
+                                    w: (x1 - x0) / bw,
+                                    h: (y1 - y0) / bh,
                                 };
-
-                                img.onerror = () => {
-                                    console.warn('Failed to load image preview:', filePath);
-                                    // Clear any broken images but keep the node functional
-                                    node.imgs = null;
-                                    node.imageIndex = 0;
-                                    app.graph.setDirtyCanvas(true, true);
+                            }
+                        } else if (drag.mode === "move" && state.rect) {
+                            let nx = (clampX(px - drag.offX) - bx) / bw;
+                            let ny = (clampY(py - drag.offY) - by) / bh;
+                            nx = Math.max(0, Math.min(1 - state.rect.w, nx));
+                            ny = Math.max(0, Math.min(1 - state.rect.h, ny));
+                            state.rect.x = nx;
+                            state.rect.y = ny;
+                        } else if (drag.mode === "resize" && state.rect) {
+                            const r = state.rect;
+                            let x0 = bx + r.x * bw;
+                            let y0 = by + r.y * bh;
+                            let x1 = x0 + r.w * bw;
+                            let y1 = y0 + r.h * bh;
+                            if (drag.corner.includes("w")) x0 = clampX(px);
+                            if (drag.corner.includes("e")) x1 = clampX(px);
+                            if (drag.corner.includes("n")) y0 = clampY(py);
+                            if (drag.corner.includes("s")) y1 = clampY(py);
+                            if (
+                                Math.abs(x1 - x0) >= MIN_SEL &&
+                                Math.abs(y1 - y0) >= MIN_SEL
+                            ) {
+                                state.rect = {
+                                    x: (Math.min(x0, x1) - bx) / bw,
+                                    y: (Math.min(y0, y1) - by) / bh,
+                                    w: Math.abs(x1 - x0) / bw,
+                                    h: Math.abs(y1 - y0) / bh,
                                 };
-
-                            } catch (e) {
-                                console.error('Failed to load image:', e);
-                                node.imgs = null;
-                                node.imageIndex = 0;
-                                app.graph.setDirtyCanvas(true, true);
                             }
                         }
-                    });
-                });
+                        this.triggerDraw?.();
+                        return true;
+                    }
 
-                return result;
+                    if (t === "pointerup" || t === "mouseup") {
+                        if (drag.mode === "new" && !drag.moved) {
+                            state.rect = null;
+                        }
+                        state.drag = null;
+                        if (event.target?.style) event.target.style.cursor = "";
+                        syncCrop();
+                        this.triggerDraw?.();
+                        return true;
+                    }
+                    return false;
+                },
             };
-        }
-    }
+
+            // Browse button under the path field and above the crop preview.
+            // Must be added BEFORE the crop editor so creation order matches
+            // visual order (and the editor stays the last, growable widget).
+            node.addWidget("button", "🔍 Browse...", null, () => {
+                const currentPath = imageWidget ? imageWidget.value : "";
+                const browser = new FileBrowserDialog(currentPath);
+                browser.show(async (filePath) => {
+                    if (imageWidget) {
+                        imageWidget.value = filePath;
+                        state.rect = null;
+                        syncCrop();
+                        // Keep current node size; letterbox the new image
+                        loadImageFromPath();
+                        app.graph.setDirtyCanvas(true, true);
+                    }
+                });
+            });
+
+            const editorWidget = node.addCustomWidget(editor);
+
+            function cursorOutside(px, py) {
+                const w = node.size?.[0];
+                const h = node.size?.[1];
+                if (w == null || h == null) return "default";
+                if (py <= h && py >= h - RESIZE_ZONE) {
+                    if (px >= w - RESIZE_ZONE) return "nwse-resize";
+                    if (px <= RESIZE_ZONE) return "nesw-resize";
+                }
+                return "default";
+            }
+            function cursorFor(px, py) {
+                if (!state.img || !state.box) return cursorOutside(px, py);
+                const { bx, by, bw, bh } = state.box;
+                if (px < bx || px > bx + bw || py < by || py > by + bh) {
+                    return cursorOutside(px, py);
+                }
+                const hit = hitTest(px, py);
+                if (hit.mode === "resize") {
+                    return hit.corner === "nw" || hit.corner === "se"
+                        ? "nwse-resize"
+                        : "nesw-resize";
+                }
+                if (hit.mode === "move") return "grab";
+                return state.rect ? "not-allowed" : "crosshair";
+            }
+            const prevMouseMove = node.onMouseMove;
+            node.onMouseMove = function (e, pos, graphCanvas) {
+                prevMouseMove?.apply(this, arguments);
+                const el = graphCanvas?.canvas || app.canvas?.canvas;
+                if (!el) return;
+                if (!state.drag) el.style.cursor = cursorFor(pos[0], pos[1]);
+                // Native tooltip while the pointer is over the image preview
+                if (state.img && state.box) {
+                    const { bx, by, bw, bh } = state.box;
+                    const x = pos[0], y = pos[1];
+                    const over =
+                        x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+                    el.title = over ? PREVIEW_TOOLTIP : "";
+                } else {
+                    el.title = "";
+                }
+            };
+            const prevMouseLeave = node.onMouseLeave;
+            node.onMouseLeave = function () {
+                prevMouseLeave?.apply(this, arguments);
+                const el = app.canvas?.canvas;
+                if (el) {
+                    el.style.cursor = "";
+                    el.title = "";
+                }
+            };
+
+            Object.defineProperty(editorWidget, "computedHeight", {
+                configurable: true,
+                get() {
+                    if (isVueMode() || allocHeight == null) return undefined;
+                    const box = boxHeight(this, this.y, allocHeight);
+                    return Math.max(0, box - RESIZE_ZONE);
+                },
+                set(v) {
+                    allocHeight = v;
+                },
+            });
+            Object.defineProperty(editorWidget, "width", {
+                configurable: true,
+                get: () => undefined,
+                set: () => {},
+            });
+
+            // Load preview from arbitrary filesystem path via our serve endpoint
+            let loadSeq = 0;
+            function loadImageFromPath() {
+                const seq = ++loadSeq;
+                const raw = imageWidget?.value || "";
+                const path = String(raw).replace(/\s*\[[^\]]+\]\s*$/, "").trim();
+                if (!path) {
+                    state.img = null;
+                    node.setDirtyCanvas?.(true, true);
+                    editorWidget.triggerDraw?.();
+                    return;
+                }
+                const filename = path.split(/[\\/]/).pop();
+                const url =
+                    `/noembryo/serve_image?path=${encodeURIComponent(path)}` +
+                    `&filename=${encodeURIComponent(filename)}&t=${Date.now()}`;
+
+                const img = new Image();
+                img.onload = () => {
+                    if (seq !== loadSeq) return;
+                    state.img = img;
+                    // Never resize the node to the image ratio — letterbox only.
+                    node.setDirtyCanvas?.(true, true);
+                    editorWidget.triggerDraw?.();
+                };
+                img.onerror = () => {
+                    if (seq !== loadSeq) return;
+                    state.img = null;
+                    node.setDirtyCanvas?.(true, true);
+                    editorWidget.triggerDraw?.();
+                };
+                img.src = url;
+            }
+
+            // Path typed / changed → clear crop and reload preview
+            if (imageWidget) {
+                const prevCallback = imageWidget.callback;
+                imageWidget.callback = function () {
+                    const r = prevCallback?.apply(this, arguments);
+                    state.rect = null;
+                    syncCrop();
+                    loadImageFromPath();
+                    return r;
+                };
+            }
+
+            // Workflow load restores crop + image without widget callbacks
+            const prevOnConfigure = node.onConfigure;
+            node.onConfigure = function () {
+                const r = prevOnConfigure?.apply(this, arguments);
+                try {
+                    const saved = cropWidget?.value ? JSON.parse(cropWidget.value) : null;
+                    state.rect = saved && saved.w > 0 && saved.h > 0 ? saved : null;
+                } catch (e) {
+                    state.rect = null;
+                }
+                loadImageFromPath();
+                return r;
+            };
+
+            loadImageFromPath();
+            return result;
+        };
+    },
 });
