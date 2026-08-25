@@ -129,6 +129,23 @@ def _parse_crop(crop, width, height):
     return x0, y0, x1, y1
 
 
+def _parse_rotation(crop):
+    """ Return the clockwise 90°-step rotation (0..3) stored inside the crop JSON.
+    The rotation is an extra "rotation" field holding degrees (0, 90, 180, 270 —
+    clockwise), managed by the ↻ button on the node. Absent / invalid => 0.
+    """
+    if not crop:
+        return 0
+    try:
+        data = json.loads(crop)
+        r = int(data.get("rotation", 0))
+    except (ValueError, AttributeError, TypeError):
+        return 0
+    if r < 0:
+        return 0
+    return (r // 90) % 4
+
+
 def _compute_downscaled_size(width, height, max_megapixels):
     """ Return (new_w, new_h) if (width, height) exceeds max_megapixels, else None.
     Downscale-only (never upscales) and aspect-preserving.
@@ -292,6 +309,8 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         " Load an image from any path (paste or Browse) or URL. Drag on the preview to"
         " crop; drag inside to move; drag corners to resize; click outside the"
         " selection to clear. With no crop drawn, the full image is output.\n"
+        " Hover the preview and click the ↻ button (top-right) to rotate the image"
+        " 90° clockwise. Rotation is preserved with the workflow.\n"
         " If max_megapixels is greater than 0, the output (crop or full image)"
         " is downscaled to fit within it, aspect ratio preserved; images already"
         " at or under the cap are left untouched. A value of 0 disables the cap.\n"
@@ -322,7 +341,18 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
             mask = torch.zeros((mask.shape[0], img_h, img_w), dtype=mask.dtype,
                 device=mask.device)
 
-        # Apply interactive crop (normalized coords from the frontend)
+        # Apply clockwise rotation stored inside the crop JSON (↻ button on node).
+        # rot = 1 => 90° clockwise, 2 => 180°, 3 => 270°.
+        rot = _parse_rotation(crop)
+        if rot:
+            # torch.rot90(k negative) rotates clockwise; image is (N, H, W, C),
+            # mask is (N, H, W) — rotate over the H/W dims.
+            image_tensor = torch.rot90(image_tensor, k=-rot, dims=(1, 2))
+            mask = torch.rot90(mask, k=-rot, dims=(1, 2))
+
+        # Apply interactive crop (normalized coords from the frontend).
+        # Crop coords are drawn on the ROTATED preview, so they now match the
+        # rotated tensor dims.
         box = _parse_crop(crop, image_tensor.shape[2], image_tensor.shape[1])
         if box is not None:
             x0, y0, x1, y1 = box

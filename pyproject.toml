@@ -11,7 +11,7 @@ limit the output's size in megapixels. \n
 * "PromptTermList (1-6)" nodes to help with the creation of Prompts. \n
 * "Auto Save Workflow" can save the current workflow to a .json file automatically. \n
 """
-version = "1.6.1"
+version = "1.6.2"
 license = {text = "MIT License"}
 
 [project.urls]

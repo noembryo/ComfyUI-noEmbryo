@@ -59,6 +59,9 @@ Load an image from **any path on your computer or a URL**. Paste an absolute pat
 The file is read from its **original location**; it is **not** copied into ComfyUI’s `input` folder.  
 Use a selection rectangle at the preview to crop it.  
 Limit (downscale) the output's size in megapixels or pixels.  
+Click the ↻ button (top-right, mouse over the preview), to rotate the image 90° clockwise.
+
+
 
 ### Interactive crop
 

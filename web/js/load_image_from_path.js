@@ -552,7 +552,7 @@ const MIN_SEL = 6;
 const MIN_EDITOR_H = 80;
 const RESIZE_ZONE = 15;
 const PREVIEW_TOOLTIP =
-    "Drag to crop · Drag inside to move · Drag corners to resize · Click outside selection to clear";
+    "Drag to crop · Drag inside to move · Drag corners to resize · Click outside selection to clear · Click ↻ to rotate 90°";
 
 app.registerExtension({
     name: "noEmbryo.LoadImageFromPath",
@@ -614,6 +614,9 @@ app.registerExtension({
                 rect: null, // normalized {x,y,w,h} or null = full image
                 drag: null,
                 box: null,
+                hoverPreview: false, // pointer currently over the image box
+                rotateHover: false,  // pointer currently over the ↻ button
+                rotateBtn: null,     // {cx, cy, r} of the ↻ button, if any
             };
 
             try {
@@ -625,21 +628,81 @@ app.registerExtension({
 
             function syncCrop() {
                 if (!cropWidget) return;
-                let value = "";
+                const parts = [];
                 if (state.rect && state.rect.w > 0.001 && state.rect.h > 0.001) {
                     const r = state.rect;
                     if (!(r.x < 0.002 && r.y < 0.002 && r.w > 0.996 && r.h > 0.996)) {
-                        value = JSON.stringify({
-                            x: +r.x.toFixed(4),
-                            y: +r.y.toFixed(4),
-                            w: +r.w.toFixed(4),
-                            h: +r.h.toFixed(4),
-                        });
+                        parts.push(`"x":${+r.x.toFixed(4)}`);
+                        parts.push(`"y":${+r.y.toFixed(4)}`);
+                        parts.push(`"w":${+r.w.toFixed(4)}`);
+                        parts.push(`"h":${+r.h.toFixed(4)}`);
                     }
                 }
+                const rot = getRotation();
+                if (rot) parts.push(`"rotation":${rot}`);
+                const value = parts.length ? `{${parts.join(",")}}` : "";
                 if (cropWidget.value !== value) {
                     cropWidget.value = value;
                 }
+            }
+
+            // --- Rotation (↻ button) ---------------------------------------
+            // Rotation lives inside the hidden crop widget's JSON as a
+            // "rotation":<degrees> field (0/90/180/270 clockwise), so no new
+            // widget/input is needed and it persists with the workflow.
+            function getRotation() {
+                try {
+                    const v = cropWidget?.value;
+                    if (!v) return 0;
+                    const r = parseInt(JSON.parse(v).rotation, 10);
+                    return isNaN(r) || r < 0 ? 0 : r % 360;
+                } catch (e) {
+                    return 0;
+                }
+            }
+
+            function setCropRotation(deg) {
+                if (!cropWidget) return;
+                let data = {};
+                const v = cropWidget.value;
+                if (v) {
+                    try { data = JSON.parse(v) || {}; } catch (e) { data = {}; }
+                }
+                if (deg) data.rotation = deg;
+                else delete data.rotation;
+                const keys = Object.keys(data);
+                cropWidget.value = keys.length ? JSON.stringify(data) : "";
+            }
+
+            // Clockwise rotation of an Image/canvas for the preview. Returns a
+            // canvas matching the backend's torch.rot90(k<0) clockwise result.
+            function rotateForPreview(src, deg) {
+                const d = ((deg % 360) + 360) % 360;
+                if (!d) return src;
+                const c = document.createElement("canvas");
+                const q = (d / 90) % 4;
+                if (q % 2 === 1) {
+                    c.width = src.height;
+                    c.height = src.width;
+                } else {
+                    c.width = src.width;
+                    c.height = src.height;
+                }
+                const ctx = c.getContext("2d");
+                ctx.translate(c.width / 2, c.height / 2);
+                ctx.rotate((d * Math.PI) / 180); // positive = clockwise (y-down)
+                ctx.drawImage(src, -src.width / 2, -src.height / 2);
+                return c;
+            }
+
+            function rotate90() {
+                const rot = (getRotation() + 90) % 360;
+                state.rect = null; // existing crop is stale after rotating
+                setCropRotation(rot);
+                syncCrop();
+                loadImageFromPath();
+                node.setDirtyCanvas?.(true, true);
+                editorWidget.triggerDraw?.();
             }
 
             function previewHeight(width) {
@@ -851,6 +914,30 @@ app.registerExtension({
                         ctx.globalAlpha = prevAlpha;
                     }
 
+                    // Hover-only ↻ rotate button (top-right of the preview)
+                    state.rotateBtn = null;
+                    if (state.img && state.hoverPreview) {
+                        const rbR = 10;
+                        const rbMargin = 8;
+                        const rcx = bx + bw - rbMargin - rbR;
+                        const rcy = by + rbMargin + rbR;
+                        state.rotateBtn = { cx: rcx, cy: rcy, r: rbR };
+                        ctx.beginPath();
+                        ctx.arc(rcx, rcy, rbR, 0, Math.PI * 2);
+                        ctx.fillStyle = state.rotateHover
+                            ? "rgba(255,255,255,0.92)"
+                            : "rgba(30,30,30,0.72)";
+                        ctx.fill();
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = state.rotateHover ? "#111" : "#fff";
+                        ctx.stroke();
+                        ctx.fillStyle = state.rotateHover ? "#111" : "#fff";
+                        ctx.font = `bold ${rbR}px sans-serif`;
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText("↻", rcx, rcy + 1);
+                    }
+
                     ctx.restore();
                 },
 
@@ -864,6 +951,15 @@ app.registerExtension({
                     const clampY = (v) => Math.max(by, Math.min(by + bh, v));
 
                     if (t === "pointerdown" || t === "mousedown") {
+                        const rb = state.rotateBtn;
+                        if (rb) {
+                            const dx = px - rb.cx;
+                            const dy = py - rb.cy;
+                            if (dx * dx + dy * dy <= rb.r * rb.r) {
+                                rotate90();
+                                return true;
+                            }
+                        }
                         if (px < bx || px > bx + bw || py < by || py > by + bh) {
                             return false;
                         }
@@ -1006,16 +1102,39 @@ app.registerExtension({
                 prevMouseMove?.apply(this, arguments);
                 const el = graphCanvas?.canvas || app.canvas?.canvas;
                 if (!el) return;
-                if (!state.drag) el.style.cursor = cursorFor(pos[0], pos[1]);
-                // Native tooltip while the pointer is over the image preview
+                const x = pos[0], y = pos[1];
+                const prevHover = state.hoverPreview;
+                const prevRotHover = state.rotateHover;
                 if (state.img && state.box) {
                     const { bx, by, bw, bh } = state.box;
-                    const x = pos[0], y = pos[1];
                     const over =
                         x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+                    state.hoverPreview = over;
                     el.title = over ? PREVIEW_TOOLTIP : "";
+                    let overRotate = false;
+                    if (over && state.rotateBtn) {
+                        const dx = x - state.rotateBtn.cx;
+                        const dy = y - state.rotateBtn.cy;
+                        overRotate =
+                            dx * dx + dy * dy <=
+                            state.rotateBtn.r * state.rotateBtn.r;
+                    }
+                    state.rotateHover = overRotate;
+                    if (!state.drag) {
+                        el.style.cursor = overRotate
+                            ? "pointer"
+                            : cursorFor(x, y);
+                    }
                 } else {
+                    state.hoverPreview = false;
+                    state.rotateHover = false;
                     el.title = "";
+                }
+                if (
+                    state.hoverPreview !== prevHover ||
+                    state.rotateHover !== prevRotHover
+                ) {
+                    node.setDirtyCanvas?.(true, true);
                 }
             };
             const prevMouseLeave = node.onMouseLeave;
@@ -1026,6 +1145,9 @@ app.registerExtension({
                     el.style.cursor = "";
                     el.title = "";
                 }
+                state.hoverPreview = false;
+                state.rotateHover = false;
+                node.setDirtyCanvas?.(true, true);
             };
 
             Object.defineProperty(editorWidget, "computedHeight", {
@@ -1071,7 +1193,8 @@ app.registerExtension({
                 const img = new Image();
                 img.onload = () => {
                     if (seq !== loadSeq) return;
-                    state.img = img;
+                    // Apply the stored clockwise rotation (matches the backend).
+                    state.img = rotateForPreview(img, getRotation());
                     // Never resize the node to the image ratio — letterbox only.
                     node.setDirtyCanvas?.(true, true);
                     editorWidget.triggerDraw?.();
