@@ -1,3 +1,5 @@
+// noinspection JSUnresolvedReference
+
 import {app} from "../../scripts/app.js";
 import {api} from "../../scripts/api.js";
 
@@ -484,7 +486,8 @@ class FileBrowserDialog {
             const hasNext = idx >= 0 && idx < (this.fileList.length - 1);
 
             previewArea.innerHTML = `
-                <div style="display:flex; align-items:center; gap:6px;">
+                <!--suppress ALL -->
+<div style="display:flex; align-items:center; gap:6px;">
                     <button id="prevImg" ${hasPrev ? '' : 'disabled'}
                         style="background:#444; border:none; color:white; width:28px; height:28px;
                                border-radius:3px; cursor:${hasPrev ? 'pointer' : 'not-allowed'};
@@ -521,8 +524,22 @@ class FileBrowserDialog {
 
 // ---------------------------------------------------------------------------
 // Interactive crop editor (adapted from obvpm/comfyui-obvpm, Apache-2.0)
-// No max_megapixels — crop only.
+// Crop, plus a max_megapixels downscale cap (downscale-only, aspect preserved).
 // ---------------------------------------------------------------------------
+
+/** Return [newW, newH] if (w, h) exceeds maxMp megapixels, else null.
+ * Downscale-only, aspect-preserving. 1.0 MP == 1024x1024 px. maxMp <= 0 disables it. */
+function computeDownscaledSize(w, h, maxMp) {
+    const mp = parseFloat(maxMp);
+    if (!mp || mp <= 0 || !w || !h) return null;
+    const maxPixels = mp * 1024 * 1024;
+    const current = w * h;
+    if (current <= maxPixels) return null;
+    const scale = Math.sqrt(maxPixels / current);
+    const nw = Math.max(1, Math.round(w * scale));
+    const nh = Math.max(1, Math.round(h * scale));
+    return [nw, nh];
+}
 
 const MARGIN = 10;
 const HANDLE = 8;
@@ -546,6 +563,26 @@ app.registerExtension({
 
             const imageWidget = node.widgets.find((w) => w.name === "image");
             const cropWidget = node.widgets.find((w) => w.name === "crop");
+            // Looked up fresh (not cached) wherever it's read — if ComfyUI ever
+            // replaces node.widgets rather than mutating it in place (reconfigure,
+            // resize, Vue/Nodes 2.0 re-render), a cached reference here would go
+            // stale and silently keep reading a detached widget forever.
+            function getMaxMegapixels() {
+                const w = node.widgets?.find((x) => x.name === "max_megapixels");
+                return w ? parseFloat(w.value) : 0;
+            }
+
+            // --- TEMPORARY DIAGNOSTIC ---------------------------------------
+            // Logs once per distinct (dims, maxMp, result) combo to the browser
+            // console so we can see exactly what the widget/math report at
+            // draw time. Safe to delete once the label issue is confirmed fixed.
+            let _lastDebugKey = null;
+            function debugDownscale(label, w, h, maxMp, result) {
+                const key = `${label}|${w}x${h}|${maxMp}|${result ? result.join("x") : "none"}`;
+                if (key === _lastDebugKey) return;
+                _lastDebugKey = key;
+            }
+            // -----------------------------------------------------------------
 
             // Hide the crop JSON widget (canvas + Nodes 2.0)
             if (cropWidget) {
@@ -744,8 +781,17 @@ app.registerExtension({
                             }
                         };
                         const [pw, ph] = cropDims();
+                        const _maxMp1 = getMaxMegapixels();
+                        const cropDown = computeDownscaledSize(pw, ph, _maxMp1);
+                        debugDownscale("crop-pill", pw, ph, _maxMp1, cropDown);
+                        const cropSegments = cropDown
+                            ? [
+                                  ["Downscaled to: ", "#fff"],
+                                  [`${cropDown[0]} x ${cropDown[1]}`, "#4af"],
+                              ]
+                            : [[`${pw} x ${ph}`, "#fff"]];
                         drawPill(
-                            [[`${pw} x ${ph}`, "#fff"]],
+                            cropSegments,
                             sy > y + pillH + 2 ? sy - 3 : sy + pillH - 1
                         );
                     }
@@ -760,6 +806,20 @@ app.registerExtension({
                             ["Full: ", true],
                             [`${iw} x ${ih}`, false],
                         ];
+                        // With no crop drawn, the full image IS the output — show the
+                        // megapixel cap here too, same as the per-crop pill does.
+                        if (!state.rect) {
+                            const _maxMp2 = getMaxMegapixels();
+                            const fullDown = computeDownscaledSize(iw, ih, _maxMp2);
+                            debugDownscale("full-label", iw, ih, _maxMp2, fullDown);
+                            if (fullDown) {
+                                segments.push([" — Downscaled to: ", true]);
+                                segments.push([
+                                    `${fullDown[0]} x ${fullDown[1]}`,
+                                    false,
+                                ]);
+                            }
+                        }
                         ctx.font = `${u.font}px sans-serif`;
                         ctx.textBaseline = "alphabetic";
                         ctx.textAlign = "left";
@@ -769,7 +829,14 @@ app.registerExtension({
                             (sum, s) => sum + ctx.measureText(s[0]).width,
                             0
                         );
-                        let cx = x + (w - total) / 2;
+                        // Clamp instead of pure-centering (mirrors the crop pill's
+                        // clamp) — with the downscale text appended this line can
+                        // exceed the available width, and an unclamped center
+                        // pushes cx negative, drawing it clipped off the node.
+                        let cx = Math.max(
+                            x,
+                            Math.min(x + (w - total) / 2, x + w - total)
+                        );
                         const prevAlpha = ctx.globalAlpha;
                         for (const [text, muted] of segments) {
                             ctx.globalAlpha = muted ? prevAlpha * MUTED_ALPHA : prevAlpha;
@@ -1005,6 +1072,20 @@ app.registerExtension({
                     editorWidget.triggerDraw?.();
                 };
                 img.src = url;
+            }
+
+            // Redraw the preview labels when the megapixel cap changes
+            const maxMpWidgetForCallback = node.widgets.find(
+                (w) => w.name === "max_megapixels"
+            );
+            if (maxMpWidgetForCallback) {
+                const prevMaxMpCallback = maxMpWidgetForCallback.callback;
+                maxMpWidgetForCallback.callback = function () {
+                    const r = prevMaxMpCallback?.apply(this, arguments);
+                    node.setDirtyCanvas?.(true, true);
+                    editorWidget.triggerDraw?.();
+                    return r;
+                };
             }
 
             // Path typed / changed → clear crop and reload preview

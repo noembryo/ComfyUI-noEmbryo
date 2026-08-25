@@ -30,8 +30,8 @@ def _pillow(fn, arg):
 
 
 def _pil_to_image_mask(img: 'Image.Image | Iterable[Image.Image]',
-        output_image: 'list[torch.Tensor] | None',
-        output_mask: 'list[torch.Tensor] | None'):
+                       output_image: 'list[torch.Tensor] | None',
+                       output_mask: 'list[torch.Tensor] | None'):
     output_images = []
     output_masks = []
     w, h = None, None
@@ -92,7 +92,7 @@ def _pil_to_image_mask(img: 'Image.Image | Iterable[Image.Image]',
 
 
 def _parse_crop(crop, width, height):
-    """Return (x0, y0, x1, y1) pixel box, or None for full image.
+    """ Return (x0, y0, x1, y1) pixel box, or None for full image.
     Crop is JSON with normalized coords: {"x","y","w","h"} in 0..1.
     Empty / invalid crop means no crop.
     """
@@ -112,17 +112,60 @@ def _parse_crop(crop, width, height):
     y1 = max(y0 + 1, min(height, round((y + h) * height)))
     if x0 == 0 and y0 == 0 and x1 == width and y1 == height:
         return None
-    return (x0, y0, x1, y1)
+    return x0, y0, x1, y1
+
+
+def _compute_downscaled_size(width, height, max_megapixels):
+    """ Return (new_w, new_h) if (width, height) exceeds max_megapixels, else None.
+    Downscale-only (never upscales) and aspect-preserving.
+    1.0 megapixels == 1024 x 1024 px, matching ComfyUI's ImageScaleToTotalPixels
+    convention. A max_megapixels of 0 (or falsy) disables the cap entirely.
+    """
+    try:
+        max_megapixels = float(max_megapixels)
+    except (TypeError, ValueError):
+        return None
+    if max_megapixels <= 0:
+        return None
+    max_pixels = max_megapixels * 1024 * 1024
+    current_pixels = width * height
+    if current_pixels <= max_pixels:
+        return None
+    scale = (max_pixels / current_pixels) ** 0.5
+    new_w = max(1, round(width * scale))
+    new_h = max(1, round(height * scale))
+    return new_w, new_h
+
+
+def _compute_center_crop_size(src_w, src_h, dst_w, dst_h):
+    """ Return (crop_w, crop_h) — the aspect-fit central box of the source that,
+    when resized to exactly (dst_w, dst_h), forces the output size with a center
+    crop around the middle. Returns None when forcing is disabled (either target
+    dim non-positive) or the source is already exactly the target size.
+    """
+    if dst_w <= 0 or dst_h <= 0:
+        return None  # forcing disabled — both width and height must be > 0
+    if src_w == dst_w and src_h == dst_h:
+        return None  # already exact size — no-op
+    src_ratio = src_w / src_h
+    dst_ratio = dst_w / dst_h
+    if src_ratio > dst_ratio:
+        # Source is wider than the target ratio → crop the sides, keep full height.
+        crop_h = src_h
+        crop_w = max(1, round(src_h * dst_ratio))
+    else:
+        # Source is taller → crop the top/bottom, keep full width.
+        crop_w = src_w
+        crop_h = max(1, round(src_w / dst_ratio))
+    return crop_w, crop_h
 
 
 class LoadImageFromPath:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required":
-                    {"image": ("STRING",
-                               {"default": r"ComfyUI_00001_-assets\ComfyUI_00001_.png "
-                                           r"[output]"})},
-                }
+        return {"required": {
+            "image": ("STRING", {"default": r"ComfyUI_00001_-assets\ComfyUI_00001_.png [output]"})},
+        }
 
     CATEGORY = "noEmbryo"
 
@@ -186,33 +229,71 @@ _clipspace_mappings = {}  # Maps expected filename -> actual filename
 class LoadImageFromPathEnhanced(LoadImageFromPath):
     @classmethod
     def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("STRING", {
-                    "default": "",
-                    "tooltip": "Absolute path, or relative with [input]/[output]/[temp]. Use Browse to pick a file.",
-                }),
-                "crop": ("STRING", {
-                    "default": "",
-                    "tooltip": "Managed by the crop editor on the node — no need to edit by hand.",
-                }),
-            },
-        }
+        return {"required": {"image": ("STRING", {"default": "",
+            "tooltip": 'Paste an absolute path, (or a relative one with a prefix '
+                       'input/, or output/, or temp/) to an image file. '
+                       'Or use "Browse" to pick a file.', }),
+                             "crop": ("STRING",
+                                      {"default": "",
+                                       "tooltip": "Managed by the crop editor on the node"
+                                                  " — no need to edit by hand.",}),
+            "max_megapixels": ("FLOAT",
+                               {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.01,
+                "tooltip": "Cap the output (crop, or full image if uncropped) to this many "
+                           "megapixels, downscaling only if it's bigger.\nSmaller images are "
+                           "left untouched.\n1.0 = 1024x1024 px. 0 disables the cap.",}), },
+            "optional": {"width": ("INT", {"forceInput": True, "min": 0, "max": 100000,
+                                           "step": 1,
+                            "tooltip": "Force the output width in px (upscale or downscale), "
+                                       "center-cropping first if the aspect ratio differs.\n"
+                                       "Leave disconnected (None) to keep natural width.\n"
+                                       "Only applies if BOTH width and height are connected, and when "
+                                       "set (not 0), and it overrides max_megapixels.", }),
+                        "height": ("INT", {"forceInput": True, "min": 0, "max": 100000, "step": 1,
+                            "tooltip": "Force the output height in px (upscale or"
+                                       " downscale), center-cropping first if the aspect"
+                                       " ratio differs.\nLeave disconnected (None) to keep"
+                                       " natural height.\nOnly takes effect if BOTH width"
+                                       " and height are connected, when set (not 0), and"
+                                       " it overrides max_megapixels.", }), }, }
 
     CATEGORY = "image"
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("IMAGE", "MASK", "path")
     FUNCTION = "load_image_enhanced"
-    DESCRIPTION = ("Load an image from any path (paste or Browse). Drag on the preview to"
-                   " crop; drag inside to move; drag corners to resize; click outside the"
-                   " selection to clear. With no crop drawn, the full image is output.")
+    DESCRIPTION = (
+        " Load an image from any path (paste or Browse). Drag on the preview to"
+        " crop; drag inside to move; drag corners to resize; click outside the"
+        " selection to clear. With no crop drawn, the full image is output.\n"
+        " If max_megapixels is greater than 0, the output (crop or full image)"
+        " is downscaled to fit within it, aspect ratio preserved; images already"
+        " at or under the cap are left untouched. A value of 0 disables the cap.\n"
+        " If both width and height are connected, the output (crop or full"
+        " image) is forced to exactly that size — upscaling or downscaling, with"
+        " a center crop first if the aspect ratio differs. This overrides"
+        " max_megapixels.")
 
-    def load_image_enhanced(self, image, crop=""):
+    def load_image_enhanced(self, image, crop="", max_megapixels=0.0, width=None,
+                            height=None):
+        # Optional inputs arrive as None when unconnected — treat as "disabled".
+        width = 0 if width is None else int(width)
+        height = 0 if height is None else int(height)
+
         # Get the full path
         image_path = LoadImageFromPath._resolve_path(image)
 
         # Call the parent class's load_image method
         image_tensor, mask = super().load_image(image)
+
+        # When there's no alpha channel, load_image's fallback mask is a fixed
+        # 64x64 "null mask" (ComfyUI's usual convention) — it does NOT match
+        # the image's pixel dimensions. Cropping/resizing below index into the
+        # mask using the image's own coordinates, so normalize it to the
+        # image's size first (still an all-zero mask, just the right shape).
+        img_h, img_w = image_tensor.shape[1], image_tensor.shape[2]
+        if mask.shape[1] != img_h or mask.shape[2] != img_w:
+            mask = torch.zeros((mask.shape[0], img_h, img_w), dtype=mask.dtype,
+                device=mask.device)
 
         # Apply interactive crop (normalized coords from the frontend)
         box = _parse_crop(crop, image_tensor.shape[2], image_tensor.shape[1])
@@ -220,6 +301,40 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
             x0, y0, x1, y1 = box
             image_tensor = image_tensor[:, y0:y1, x0:x1, :]
             mask = mask[:, y0:y1, x0:x1]
+
+        # If BOTH width and height are > 0, the output is forced to exactly that
+        # size — upscaling or downscaling, with a center crop first if the aspect
+        # ratio differs. This overrides max_megapixels (the user's explicit
+        # target size IS the final size).
+        out_h, out_w = image_tensor.shape[1], image_tensor.shape[2]
+        force = _compute_center_crop_size(out_w, out_h, width, height)
+        if force is not None:
+            crop_w, crop_h = force
+            # Center-crop the source to the target aspect ratio.
+            x0 = max(0, (out_w - crop_w) // 2)
+            y0 = max(0, (out_h - crop_h) // 2)
+            image_tensor = image_tensor[:, y0:y0 + crop_h, x0:x0 + crop_w, :]
+            mask = mask[:, y0:y0 + crop_h, x0:x0 + crop_w]
+            # Resize the center-cropped box to exactly width x height.
+            new_w, new_h = int(width), int(height)
+            image_tensor = torch.nn.functional.interpolate(
+                image_tensor.permute(0, 3, 1, 2), size=(new_h, new_w), mode="bilinear",
+                antialias=True, ).permute(0, 2, 3, 1).clamp(0.0, 1.0)
+            mask = torch.nn.functional.interpolate(mask.unsqueeze(1), size=(new_h, new_w),
+                mode="bilinear", antialias=True, ).squeeze(1).clamp(0.0, 1.0)
+        else:
+            # Cap the output (crop, or full image if uncropped) to max_megapixels.
+            # Downscale-only: images already at or under the cap pass through
+            # untouched. Skipped entirely when size forcing is active above.
+            target = _compute_downscaled_size(out_w, out_h, max_megapixels)
+            if target is not None:
+                new_w, new_h = target
+                image_tensor = torch.nn.functional.interpolate(
+                    image_tensor.permute(0, 3, 1, 2), size=(new_h, new_w),
+                    mode="bilinear", antialias=True, ).permute(0, 2, 3, 1).clamp(0.0, 1.0)
+                mask = torch.nn.functional.interpolate(mask.unsqueeze(1),
+                    size=(new_h, new_w), mode="bilinear", antialias=True, ).squeeze(
+                    1).clamp(0.0, 1.0)
 
         # Register this image in our cache for mask editor support
         filename = os.path.basename(str(image_path))
@@ -230,23 +345,27 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         return image_tensor, mask, image
 
     @classmethod
-    def IS_CHANGED(cls, image, crop=""):
+    def IS_CHANGED(cls, image, crop="", max_megapixels=0.0, width=0, height=0):
         image_path = LoadImageFromPath._resolve_path(image)
         m = hashlib.sha256()
         with open(image_path, 'rb') as f:
             m.update(f.read())
         m.update(str(crop).encode("utf-8"))
+        m.update(str(max_megapixels).encode("utf-8"))
+        m.update(str(width).encode("utf-8"))
+        m.update(str(height).encode("utf-8"))
         return m.digest().hex()
 
     @classmethod
-    def VALIDATE_INPUTS(cls, image, crop=""):
+    def VALIDATE_INPUTS(cls, image, crop="", max_megapixels=0.0, width=0, height=0):
         return LoadImageFromPath.VALIDATE_INPUTS(image)
 
 
 # Middleware to handle clipspace file resolution
 @web.middleware
 async def clipspace_resolver_middleware(request, handler):
-    """ Middleware to intercept /api/view requests and resolve clipspace filename mismatches.
+    """ Middleware to intercept /api/view requests and resolve clipspace filename
+    mismatches.
     This fixes the issue where mask editor looks for 'clipspace-mask-X.png' but 
     the actual file is 'clipspace-painted-masked-X.png'
     """
@@ -302,8 +421,8 @@ async def browse_directory(request):
                           os.path.exists(f"{d}:\\")]
                 return web.json_response(
                     {'directories': drives, 'files': [], 'current_path': '',
-                        'parent_path': None,  # Up stays disabled on the drive list
-                        'sort_method': sort_method})
+                     'parent_path': None,  # Up stays disabled on the drive list
+                     'sort_method': sort_method})
             else:  # Unix-like
                 path = os.path.expanduser('~')
 
@@ -340,7 +459,7 @@ async def browse_directory(request):
                     continue
 
                 items.append({'name': item, 'type': item_type, 'path': item_path,
-                    'modified': stat.st_mtime})
+                              'modified': stat.st_mtime})
 
             # Apply sorting
             if sort_method == 'name_asc':
@@ -373,7 +492,7 @@ async def browse_directory(request):
 
         return web.json_response(
             {'directories': directories, 'files': files, 'current_path': path,
-                'parent_path': parent_path, 'sort_method': sort_method})
+             'parent_path': parent_path, 'sort_method': sort_method})
 
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
@@ -391,6 +510,8 @@ async def get_image_preview(request):
         img = _pillow(Image.open, image_path)
         img = _pillow(ImageOps.exif_transpose, img)
 
+        original_width, original_height = img.size   # ← capture BEFORE downscale
+
         max_size = (512, 512)
         img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
@@ -402,8 +523,8 @@ async def get_image_preview(request):
         img_str = base64.b64encode(buffer.getvalue()).decode()
 
         return web.json_response(
-            {'preview': f'data:image/png;base64,{img_str}', 'width': img.width,
-                'height': img.height})
+            {'preview': f'data:image/png;base64,{img_str}', 'width': original_width,
+             'height': original_height})
 
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)

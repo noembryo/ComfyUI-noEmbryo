@@ -28,6 +28,7 @@ For the custom text integration, there is a variable (can be specified by the us
   - **custom_text** is the custom text that will be inserted into the item's prompt text.
 - **Advanced Usage**  
   ![Example](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/JsonLoader2.png) 
+  
   - **Adding new items**  
     To add a new item, we have to write it in the `custom_text` input, using the following format:  
     ```
@@ -53,10 +54,46 @@ For the custom text integration, there is a variable (can be specified by the us
 
 ---
 ## Load Image (from path)
-![LoadImage](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
-A node lets you load an image from any path in your computer, either by pasting an address, or by using a file picker to browse your drives.  
-It also displays the image in the node.  
-It's an enhanced version of the "[Load Image From Path (Enhanced)](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes#load-image-from-path-enhanced)" from [`ComfyUI_Ib_CustomNodes`](ComfyUI_Ib_CustomNodes).
+![LoadImageFromPath](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
+Load an image from **any path on your computer**. Paste an absolute path, use an annotated path (`input/file.png` for  `[input]`/`[output]`/`[temp]`), or click the **Browse** dialog to pick a file from your drives.  
+The file is read from its **original location**; it is **not** copied into ComfyUI’s `input` folder.  
+Use a selection rectangle at the preview to crop it.  
+Limit (downscale) the output's size in megapixels or pixels.  
+
+### Interactive crop
+
+The node shows a live preview. You can crop directly on it:
+
+- **Drag** on the image to draw a crop rectangle  
+- **Drag inside** the selection to move the crop rectangle 
+- **Drag a corner** to resize it  
+- **Click** (without dragging) outside the rectangle to clear it  
+
+With no crop drawn, the **full image** is output. The crop is stored in the workflow as normalized coordinates, so it survives save/reload. Changing the path clears the crop.
+
+The output (cropped or full) will be downscaled only (not upscaled), by the value in the `max_megapixels` field.
+
+Outputs match the stock Load Image node: **IMAGE**, **MASK** (from the alpha channel when present), plus the original **path** string.
+
+
+
+- **Controls**
+  - **image**: Paste an absolute path, (or a relative one with a prefix input/, or output/, or temp/), to an image file.
+  - **max_megapixels**: Cap the output (crop, or full image if uncropped) to this many megapixels, downscaling only if it's bigger.
+    Smaller images are left untouched. 1.0 = 1024x1024 px. 0 disables the cap.
+  - **Browse...**: to open an image file from your drives.
+
+- **Inputs/Outputs**
+  - **Width/Height** inputs: Force the output width in px (upscale or downscale), center-cropping first if the aspect ratio differs.
+    Leave disconnected (None) to keep natural width.
+    Only applies if BOTH width and height are connected, and when set (not 0). It overrides the `max_megapixels` value.
+  - **IMAGE/MASK**: The final, processed image/mask.
+  - **path**: A string with the image's path.
+
+
+
+**Credits:**  
+Built as a much enhanced version of [Load Image From Path (Enhanced)](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes#load-image-from-path-enhanced) from [ComfyUI_Ib_CustomNodes](https://github.com/Chaoses-Ib/ComfyUI_Ib_CustomNodes), with parts of the interactive crop UI inspired from [Load Image & Crop](https://github.com/obvpm/comfyui-obvpm#load-image--crop) in [comfyui-obvpm](https://github.com/obvpm/comfyui-obvpm).
 
 ---
 ## Resolution Scale
@@ -86,7 +123,6 @@ No quality loss, like when trying to concatenate encoded videos.
   - (Optional), the current generated AV latent to be added as the last part of the stitching
 
 - **Controls**
-
   - **folder** is the folder containing clip_00001.safetensors, clip_00002.safetensors, etc.
     Absolute paths and paths relative to ComfyUI/output are accepted.
   - **pattern** is the filename glob. The final five-digit number is treated as the clip index.
