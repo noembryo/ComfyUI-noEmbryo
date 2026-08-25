@@ -230,9 +230,8 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"image": ("STRING", {"default": "",
-            "tooltip": 'Paste an absolute path, (or a relative one with a prefix '
-                       'input/, or output/, or temp/) to an image file. '
-                       'Or use "Browse" to pick a file.', }),
+            "tooltip": 'Paste an absolute path, (or a relative one with a prefix input/) '
+                       'to an image file. Or use "Browse" to pick a file.', }),
                              "crop": ("STRING",
                                       {"default": "",
                                        "tooltip": "Managed by the crop editor on the node"
