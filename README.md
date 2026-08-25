@@ -55,7 +55,7 @@ For the custom text integration, there is a variable (can be specified by the us
 ---
 ## Load Image (from path)
 ![LoadImageFromPath](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
-Load an image from **any path on your computer**. Paste an absolute path, use an annotated path (`input/file.png`), or click the **Browse** dialog to pick a file from your drives.  
+Load an image from **any path on your computer or a URL**. Paste an absolute path or a link to an image, use an annotated path (`input/file.png`), or click the **Browse** dialog to pick a file from your drives.  
 The file is read from its **original location**; it is **not** copied into ComfyUI’s `input` folder.  
 Use a selection rectangle at the preview to crop it.  
 Limit (downscale) the output's size in megapixels or pixels.  
@@ -78,7 +78,7 @@ Outputs match the stock Load Image node: **IMAGE**, **MASK** (from the alpha cha
 
 
 - **Controls**
-  - **image**: Paste an absolute path, (or a relative one with a prefix input/, or output/, or temp/), to an image file.
+  - **image**: Paste an absolute path, (or a relative one with a prefix input/, or output/, or temp/), or a URL to an image file.
   - **max_megapixels**: Cap the output (crop, or full image if uncropped) to this many megapixels, downscaling only if it's bigger.
     Smaller images are left untouched. 1.0 = 1024x1024 px. 0 disables the cap.
   - **Browse...**: to open an image file from your drives.

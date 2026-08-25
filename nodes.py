@@ -7,14 +7,14 @@ from .load_image_from_path import LoadImageFromPathEnhanced
 from .stitcher import H3MotionContextClipStitcher
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (1, 6, 0),
+            "version": (1, 6, 1),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 

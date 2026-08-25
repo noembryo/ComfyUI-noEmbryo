@@ -2,7 +2,7 @@
 name = "comfyui-noembryo"
 description = """
 A collection of nodes for ComyUI. \n
-* "Load Image (from path)" is a node lets you load an image from any path in your computer, and a selection rectangle at the preview to crop it. It can also
+* "Load Image (from path)" is a node lets you load an image from any path in your computer or a URL, and use a selection rectangle at the preview to crop it. It can also
 limit the output's size in megapixels. \n
 * "H3 Motion Context Clip Stitcher" is a node that concatenates H3 Motion Context clip archives. \n
 * "JsonPromptLoader" is a node that enhances a propt using a .json file with `item:prompt` pairs. \n
@@ -11,7 +11,7 @@ limit the output's size in megapixels. \n
 * "PromptTermList (1-6)" nodes to help with the creation of Prompts. \n
 * "Auto Save Workflow" can save the current workflow to a .json file automatically. \n
 """
-version = "1.6.0"
+version = "1.6.1"
 license = {text = "MIT License"}
 
 [project.urls]

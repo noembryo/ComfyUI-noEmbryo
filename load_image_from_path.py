@@ -1,9 +1,11 @@
 import hashlib
-from pathlib import Path
-from typing import Iterable
+import io
 import os
 import json
 import shutil
+from pathlib import Path
+from typing import Iterable
+from urllib.request import urlopen, Request
 
 from PIL import (Image, ImageOps, ImageSequence, ImageFile, UnidentifiedImageError, )
 import numpy as np
@@ -12,6 +14,18 @@ import torch
 import folder_paths
 from aiohttp import web
 from server import PromptServer
+
+
+def _is_url(s) -> bool:
+    """Return True if s looks like an HTTP(S) URL."""
+    return isinstance(s, str) and (s.startswith("http://") or s.startswith("https://"))
+
+
+def _fetch_url_bytes(url: str, timeout: float = 30.0) -> bytes:
+    """Download the bytes of a URL. Raises on any network/HTTP problem."""
+    req = Request(url, headers={"User-Agent": "ComfyUI-noEmbryo/1.0"})
+    with urlopen(req, timeout=timeout) as resp:
+        return resp.read()
 
 
 def _pillow(fn, arg):
@@ -174,9 +188,11 @@ class LoadImageFromPath:
 
     @staticmethod
     def load_image(image):
-        image_path = LoadImageFromPath._resolve_path(image)
-
-        i = _pillow(Image.open, image_path)
+        if _is_url(image):
+            i = _pillow(Image.open, io.BytesIO(_fetch_url_bytes(image)))
+        else:
+            image_path = LoadImageFromPath._resolve_path(image)
+            i = _pillow(Image.open, image_path)
 
         image = []
         mask = []
@@ -200,6 +216,16 @@ class LoadImageFromPath:
 
     @classmethod
     def IS_CHANGED(cls, image):
+        if _is_url(image):
+            # URLs: hash the fetched content to detect remote changes. If the
+            # network fails (transient blip etc.), fall back to hashing the URL
+            # string so a re-run isn't triggered spuriously.
+            try:
+                data = _fetch_url_bytes(image)
+            except Exception:
+                return hashlib.sha256(image.encode("utf-8")).hexdigest()
+            return hashlib.sha256(data).hexdigest()
+
         image_path = LoadImageFromPath._resolve_path(image)
         m = hashlib.sha256()
         with open(image_path, 'rb') as f:
@@ -210,6 +236,8 @@ class LoadImageFromPath:
     def VALIDATE_INPUTS(cls, image):
         if image is None:
             return True
+        if _is_url(image):
+            return True  # URLs skip the filesystem checks
         try:
             image_path = LoadImageFromPath._resolve_path(image)
         except ValueError as e:
@@ -231,7 +259,7 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
     def INPUT_TYPES(cls):
         return {"required": {"image": ("STRING", {"default": "",
             "tooltip": 'Paste an absolute path, (or a relative one with a prefix input/) '
-                       'to an image file. Or use "Browse" to pick a file.', }),
+                       'to an image file, or a URL of an image. Or use "Browse" to pick a file.', }),
                              "crop": ("STRING",
                                       {"default": "",
                                        "tooltip": "Managed by the crop editor on the node"
@@ -261,7 +289,7 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
     RETURN_NAMES = ("IMAGE", "MASK", "path")
     FUNCTION = "load_image_enhanced"
     DESCRIPTION = (
-        " Load an image from any path (paste or Browse). Drag on the preview to"
+        " Load an image from any path (paste or Browse) or URL. Drag on the preview to"
         " crop; drag inside to move; drag corners to resize; click outside the"
         " selection to clear. With no crop drawn, the full image is output.\n"
         " If max_megapixels is greater than 0, the output (crop or full image)"
@@ -278,8 +306,8 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         width = 0 if width is None else int(width)
         height = 0 if height is None else int(height)
 
-        # Get the full path
-        image_path = LoadImageFromPath._resolve_path(image)
+        # URLs don't map to a local filesystem path — resolve only real paths.
+        image_path = None if _is_url(image) else LoadImageFromPath._resolve_path(image)
 
         # Call the parent class's load_image method
         image_tensor, mask = super().load_image(image)
@@ -336,19 +364,32 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
                     1).clamp(0.0, 1.0)
 
         # Register this image in our cache for mask editor support
-        filename = os.path.basename(str(image_path))
-        _image_path_cache[filename] = str(image_path)
-        _image_path_cache[str(image_path)] = str(image_path)
+        # (local filesystem paths only — skip URLs).
+        if image_path is not None:
+            filename = os.path.basename(str(image_path))
+            _image_path_cache[filename] = str(image_path)
+            _image_path_cache[str(image_path)] = str(image_path)
 
-        # Return image, mask, AND the original input path string
+        # Return image, mask, AND the original input string (path or URL)
         return image_tensor, mask, image
 
     @classmethod
     def IS_CHANGED(cls, image, crop="", max_megapixels=0.0, width=0, height=0):
-        image_path = LoadImageFromPath._resolve_path(image)
-        m = hashlib.sha256()
-        with open(image_path, 'rb') as f:
-            m.update(f.read())
+        if _is_url(image):
+            # URLs: hash the fetched content to detect remote changes, falling
+            # back to a URL-string hash if the network fails (transient blip).
+            try:
+                base = hashlib.sha256(_fetch_url_bytes(image)).digest()
+            except Exception:
+                base = hashlib.sha256(image.encode("utf-8")).digest()
+        else:
+            image_path = LoadImageFromPath._resolve_path(image)
+            m = hashlib.sha256()
+            with open(image_path, 'rb') as f:
+                m.update(f.read())
+            base = m.digest()
+
+        m = hashlib.sha256(base)
         m.update(str(crop).encode("utf-8"))
         m.update(str(max_megapixels).encode("utf-8"))
         m.update(str(width).encode("utf-8"))

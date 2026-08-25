@@ -22,8 +22,13 @@ function dirnameOf(pathStr) {
 // File browser dialog
 class FileBrowserDialog {
     constructor(initialPath) {
-        // Prefer the path that is already in the node, then fall back to last browsed
-        const fromWidget = dirnameOf(initialPath);
+        // Prefer the path that is already in the node, then fall back to last browsed.
+        // A URL value (http/https) isn't a filesystem path — treating its host/path as a
+        // directory would produce an "Invalid path" error, so skip it and use the last
+        // browsed path (or the drive list) instead.
+        const fromWidget = /^https?:\/\//i.test(initialPath || '')
+            ? ''
+            : dirnameOf(initialPath);
         this.currentPath = fromWidget || lastBrowsedPath || '';
         this.initialFilePath = initialPath || null;   // ← keep the full path
         this.selectedFile = null;
@@ -1052,10 +1057,16 @@ app.registerExtension({
                     editorWidget.triggerDraw?.();
                     return;
                 }
-                const filename = path.split(/[\\/]/).pop();
+                // URLs are loaded directly by the browser (cross-origin <img>
+                // display + canvas draw works fine — no read-back is used, so
+                // there's no canvas taint issue). Local paths go through our
+                // serve proxy endpoint.
                 const url =
-                    `/noembryo/serve_image?path=${encodeURIComponent(path)}` +
-                    `&filename=${encodeURIComponent(filename)}&t=${Date.now()}`;
+                    /^https?:\/\//i.test(path)
+                        ? path
+                        : `/noembryo/serve_image?path=${encodeURIComponent(path)}` +
+                          `&filename=${encodeURIComponent(path.split(/[\\/]/).pop())}` +
+                          `&t=${Date.now()}`;
 
                 const img = new Image();
                 img.onload = () => {
