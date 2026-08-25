@@ -55,7 +55,7 @@ For the custom text integration, there is a variable (can be specified by the us
 ---
 ## Load Image (from path)
 ![LoadImageFromPath](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
-Load an image from **any path on your computer**. Paste an absolute path, use an annotated path (`input/file.png` for  `[input]`/`[output]`/`[temp]`), or click the **Browse** dialog to pick a file from your drives.  
+Load an image from **any path on your computer**. Paste an absolute path, use an annotated path (`input/file.png`), or click the **Browse** dialog to pick a file from your drives.  
 The file is read from its **original location**; it is **not** copied into ComfyUI’s `input` folder.  
 Use a selection rectangle at the preview to crop it.  
 Limit (downscale) the output's size in megapixels or pixels.  
