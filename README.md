@@ -81,7 +81,7 @@ Outputs match the stock Load Image node: **IMAGE**, **MASK** (from the alpha cha
 
 
 - **Controls**
-  - **image**: Paste an absolute path, (or a relative one with a prefix input/, or output/, or temp/), or a URL to an image file.
+  - **image**: Paste an absolute path, (or a relative one with a prefix input/), or a URL to an image file.
   - **max_megapixels**: Cap the output (crop, or full image if uncropped) to this many megapixels, downscaling only if it's bigger.
     Smaller images are left untouched. 1.0 = 1024x1024 px. 0 disables the cap.
   - **Browse...**: to open an image file from your drives.
