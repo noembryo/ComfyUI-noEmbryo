@@ -191,87 +191,13 @@ def _compute_center_crop_size(src_w, src_h, dst_w, dst_h):
     return crop_w, crop_h
 
 
-class LoadImageFromPath:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {
-            "image": ("STRING", {"default": r"ComfyUI_00001_-assets\ComfyUI_00001_.png [output]"})},
-        }
-
-    CATEGORY = "noEmbryo"
-
-    RETURN_TYPES = ("IMAGE", "MASK")
-    FUNCTION = "load_image"
-
-    @staticmethod
-    def load_image(image):
-        if _is_url(image):
-            i = _pillow(Image.open, io.BytesIO(_fetch_url_bytes(image)))
-        else:
-            image_path = LoadImageFromPath._resolve_path(image)
-            i = _pillow(Image.open, image_path)
-
-        image = []
-        mask = []
-        _pil_to_image_mask(i, image, mask)
-        return image[0], mask[0]
-
-    @staticmethod
-    def _resolve_path(image) -> Path:
-        # Keep support for the old annotated forms
-        name, base_dir = folder_paths.annotated_filepath(image)
-        if base_dir is not None:
-            # Annotated path – still go through the secure helper
-            return Path(folder_paths.get_annotated_filepath(image))
-
-        # noinspection PyTypeChecker
-        p = Path(image).expanduser()  # No annotation → treat as a real filesystem path
-        if not p.is_absolute():
-            # Relative path without annotation → relative to input (old behaviour)
-            p = Path(folder_paths.get_input_directory()) / p
-        return p.resolve()
-
-    @classmethod
-    def IS_CHANGED(cls, image):
-        if _is_url(image):
-            # URLs: hash the fetched content to detect remote changes. If the
-            # network fails (transient blip etc.), fall back to hashing the URL
-            # string so a re-run isn't triggered spuriously.
-            try:
-                data = _fetch_url_bytes(image)
-            except Exception:
-                return hashlib.sha256(image.encode("utf-8")).hexdigest()
-            return hashlib.sha256(data).hexdigest()
-
-        image_path = LoadImageFromPath._resolve_path(image)
-        m = hashlib.sha256()
-        with open(image_path, 'rb') as f:
-            m.update(f.read())
-        return m.digest().hex()
-
-    @classmethod
-    def VALIDATE_INPUTS(cls, image):
-        if image is None:
-            return True
-        if _is_url(image):
-            return True  # URLs skip the filesystem checks
-        try:
-            image_path = LoadImageFromPath._resolve_path(image)
-        except ValueError as e:
-            return str(e)
-        if not image_path.exists():
-            return "Invalid image path: {}".format(image_path)
-        if not image_path.is_file():
-            return "Path is not a file: {}".format(image_path)
-        return True
-
-
 # Global cache to track image paths and ClipSpace mappings
 _image_path_cache = {}
 _clipspace_mappings = {}  # Maps expected filename -> actual filename
 
 
-class LoadImageFromPathEnhanced(LoadImageFromPath):
+# noinspection PyBroadException
+class LoadImageFromPathEnhanced:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"image": ("STRING", {"default": "",
@@ -301,7 +227,7 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
                                        " and height are connected, when set (not 0), and"
                                        " it overrides max_megapixels.", }), }, }
 
-    CATEGORY = "image"
+    CATEGORY = "noEmbryo"
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("IMAGE", "MASK", "path")
     FUNCTION = "load_image_enhanced"
@@ -319,6 +245,35 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         " a center crop first if the aspect ratio differs. This overrides"
         " max_megapixels.")
 
+    def load_image(self, image):
+        if _is_url(image):
+            i = _pillow(Image.open, io.BytesIO(_fetch_url_bytes(image)))
+        else:
+            image_path = self._resolve_path(image)
+            i = _pillow(Image.open, image_path)
+
+        image = []
+        mask = []
+        _pil_to_image_mask(i, image, mask)
+        return image[0], mask[0]
+
+    @staticmethod
+    def _resolve_path(image) -> Path:
+        # Keep support for the old annotated forms
+        name, base_dir = folder_paths.annotated_filepath(image)
+        if base_dir is not None:
+            # Annotated path – still go through the secure helper
+            return Path(folder_paths.get_annotated_filepath(image))
+
+        # noinspection PyTypeChecker
+        p = Path(image).expanduser()  # No annotation → treat as a real filesystem path
+        if not p.is_absolute():
+            if image.startswith("input"):
+                p = Path(image[6:])
+            # Relative path without annotation → relative to input (old behaviour)
+            p = Path(folder_paths.get_input_directory()) / p
+        return p.resolve()
+
     def load_image_enhanced(self, image, crop="", max_megapixels=0.0, width=None,
                             height=None):
         # Optional inputs arrive as None when unconnected — treat as "disabled".
@@ -326,10 +281,9 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         height = 0 if height is None else int(height)
 
         # URLs don't map to a local filesystem path — resolve only real paths.
-        image_path = None if _is_url(image) else LoadImageFromPath._resolve_path(image)
+        image_path = None if _is_url(image) else self._resolve_path(image)
 
-        # Call the parent class's load_image method
-        image_tensor, mask = super().load_image(image)
+        image_tensor, mask = self.load_image(image)
 
         # When there's no alpha channel, load_image's fallback mask is a fixed
         # 64x64 "null mask" (ComfyUI's usual convention) — it does NOT match
@@ -413,7 +367,7 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
             except Exception:
                 base = hashlib.sha256(image.encode("utf-8")).digest()
         else:
-            image_path = LoadImageFromPath._resolve_path(image)
+            image_path = cls._resolve_path(image)
             m = hashlib.sha256()
             with open(image_path, 'rb') as f:
                 m.update(f.read())
@@ -426,9 +380,22 @@ class LoadImageFromPathEnhanced(LoadImageFromPath):
         m.update(str(height).encode("utf-8"))
         return m.digest().hex()
 
+    # noinspection PyUnusedLocal
     @classmethod
-    def VALIDATE_INPUTS(cls, image, crop="", max_megapixels=0.0, width=0, height=0):
-        return LoadImageFromPath.VALIDATE_INPUTS(image)
+    def VALIDATE_INPUTS(cls, image, max_megapixels=0.0, width=0, height=0):
+        if image is None:
+            return True
+        if _is_url(image):
+            return True  # URLs skip the filesystem checks
+        try:
+            image_path = cls._resolve_path(image)
+        except ValueError as e:
+            return str(e)
+        if not image_path.exists():
+            return "Invalid image path: {}".format(image_path)
+        if not image_path.is_file():
+            return "Path is not a file: {}".format(image_path)
+        return True
 
 
 # Middleware to handle clipspace file resolution
@@ -480,7 +447,8 @@ PromptServer.instance.app.middlewares.append(clipspace_resolver_middleware)
 # Server endpoints for file browsing
 @PromptServer.instance.routes.get("/noembryo/browse_directory")
 async def browse_directory(request):
-    """Browse directories and return file listings"""
+    """ Browse directories and return file listings
+    """
     try:
         path = request.query.get('path', '')
         sort_method = request.query.get('sort', 'name_asc')
@@ -570,7 +538,8 @@ async def browse_directory(request):
 
 @PromptServer.instance.routes.get("/noembryo/get_image_preview")
 async def get_image_preview(request):
-    """Get a preview of an image at the given path"""
+    """ Get a preview of an image at the given path
+    """
     try:
         image_path = request.query.get('path', '')
 
