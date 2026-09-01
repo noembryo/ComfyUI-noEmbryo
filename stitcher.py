@@ -17,6 +17,12 @@ import re
 import torch
 import torch.nn.functional as F
 import folder_paths
+from comfy.utils import ProgressBar
+
+try:
+    from comfy_execution.graph_utils import get_original_node_id
+except Exception:
+    get_original_node_id = None
 
 try:
     from safetensors.torch import load_file as st_load
@@ -28,7 +34,7 @@ try:
 except Exception:
     torchaudio = None
 
-log_ = logging.getLogger("h3_motion_context_archive")
+log_ = logging.getLogger("h3_motion_context_clip_stitcher")
 
 
 def _resolve_folder(path):
@@ -70,8 +76,8 @@ def _find_files(folder, pattern, first_clip, last_clip):
         paths.append((idx, p))
     paths.sort(key=lambda x: x[0])
     if not paths:
-        raise FileNotFoundError("H3 Motion Context Clip Stitcher: "
-                                "no numbered .safetensors files matched '%s' in %s."
+        raise FileNotFoundError("H3 Motion Context Clip Stitcher: no numbered "
+                                ".safetensors files matched '%s' in %s."
                                 % (pattern, folder))
 
     # Do not silently skip a missing numbered clip. A gap usually means an
@@ -128,8 +134,8 @@ def _decode_audio(audio_vae, audio_latent):
     audio = audio_vae.decode(audio_latent)
     # Current ComfyUI audio VAE returns [B,L,C]. Convert to [B,C,L].
     if audio.ndim != 3:
-        raise RuntimeError(
-            "H3 audio VAE returned unexpected shape %s" % (tuple(audio.shape),))
+        raise RuntimeError("H3 audio VAE returned unexpected shape %s"
+                           % (tuple(audio.shape),))
     audio = audio.movedim(-1, 1)
     sr = int(getattr(audio_vae, "audio_sample_rate_output",
                      getattr(audio_vae, "audio_sample_rate", 32000)))
@@ -206,8 +212,22 @@ def _av_from_live_latent(latent):
     if len(parts) < 2:
         raise ValueError("h3_motion_context: latent has no audio stream; wire the "
                          "sampler output of an H3 AV graph.")
-    video = parts[0].cpu().contiguous()
-    audio = parts[1].cpu().contiguous()
+    # NestedTensor.unbind() returns views into the packed underlying storage.
+    # Passing such views (or tensors still carrying nested metadata) to a VAE's
+    # CUDA kernels can trigger cudaErrorIllegalAddress. Force a real, dense,
+    # detached CPU copy of each stream before handing them to the VAE.
+    video = parts[0].detach().to("cpu", copy=True).contiguous()
+    audio = parts[1].detach().to("cpu", copy=True).contiguous()
+    # Live streams can carry the same shapes as the archive files (video
+    # [B,C,T,H,W] or [C,T,H,W]; audio [B,C,2,T] or [B,L,C]).
+    expected_ndim = {"video": (4, 5), "audio": (3, 4)}
+    for name, t in (("video", video), ("audio", audio)):
+        if t.ndim not in expected_ndim[name]:
+            raise ValueError("h3_motion_context: live %s stream has unexpected "
+                             "shape %s." % (name, tuple(t.shape)))
+        if not torch.is_floating_point(t):
+            raise ValueError("h3_motion_context: live %s stream is not a float "
+                             "tensor (dtype %s)." % (name, t.dtype))
     return video, audio
 
 
@@ -252,7 +272,7 @@ class H3MotionContextClipStitcher:
     RETURN_TYPES = ("IMAGE", "AUDIO", "INT", "STRING")
     RETURN_NAMES = ("images", "audio", "frame_count", "report")
     FUNCTION = "stitch"
-    CATEGORY = "video/minimax"
+    CATEGORY = "noEmbryo"
     DESCRIPTION = ("Final assembly for NikoDemon80's H3 Motion Context AV clip archives.\n"
                    "Loads numbered h3_motion_context_av_v1 files, decodes one clip at a "
                    "time, dissolves the overlap between adjacent clips (video + synchronized audio), "
@@ -261,7 +281,7 @@ class H3MotionContextClipStitcher:
     # noinspection PyUnusedLocal
     @classmethod
     def IS_CHANGED(cls, folder, pattern, first_clip, last_clip, context_length, fps,
-                   video_vae=None, audio_vae=None,):
+                   video_vae=None, audio_vae=None, latent=None):
         # noinspection PyBroadException
         try:
             d = _resolve_folder(folder)
@@ -278,8 +298,7 @@ class H3MotionContextClipStitcher:
         if video_vae is None:
             raise ValueError("Connect your MiniMax H3 video VAE to 'video_vae'.")
         if st_load is None:
-            raise RuntimeError(
-                "safetensors is not available in this ComfyUI environment.")
+            raise RuntimeError("safetensors is not available in this ComfyUI environment")
 
         d = _resolve_folder(folder)
         files = _find_files(d, pattern, first_clip, last_clip)
@@ -292,8 +311,7 @@ class H3MotionContextClipStitcher:
             else:
                 live_index = int(first_clip)
             video_latent, audio_latent = _av_from_live_latent(latent)
-            live_entry = (
-            live_index, None, video_latent, audio_latent)  # path=None marks it as live
+            live_entry = (live_index, None, video_latent, audio_latent)  # path=None marks it as live
 
         image_parts = []
         audio_parts = []
@@ -311,7 +329,10 @@ class H3MotionContextClipStitcher:
             all_entries.append(live_entry)
 
         total_count = len(files) + (1 if live_entry is not None else 0)
-        log_.info("H3 archive stitcher: %d clip(s) selected from %s", total_count, d)
+        # noinspection PyCallingNonCallable
+        pbar = ProgressBar(total_count, node_id=get_original_node_id()
+                           if get_original_node_id is not None else None)
+        log_.info("H3 clip stitcher: %d clip(s) selected from %s", total_count, d)
 
         # Degenerate crossfade (no overlap or a single clip) falls back to a
         # plain concatenation, which is exactly what the trim modes would do.
@@ -322,7 +343,7 @@ class H3MotionContextClipStitcher:
                 video_latent, audio_latent = _load_archive(path)
             else:
                 video_latent, audio_latent = live_video, live_audio
-                log_.info("H3 archive stitcher: clip %05d taken from live latent input",
+                log_.info("H3 clip stitcher: clip %05d taken from live latent input",
                           idx)
 
             # Decode one clip at a time. The decoded result is immediately moved
@@ -339,6 +360,25 @@ class H3MotionContextClipStitcher:
 
             decoded_frames = int(images.shape[0])
             is_last = pos == len(all_entries) - 1
+
+            if not crossfade_active:
+                # Single clip (or zero overlap): no boundaries to blend, just
+                # emit the whole decoded clip and finish.
+                if audio is not None and target_sr is None:
+                    target_sr = int(audio["sample_rate"])
+                image_parts.append(images)
+                if audio is not None:
+                    audio_parts.append(audio["waveform"])
+                report_lines.append("clip_%05d: decoded=%d frames, no crossfade "
+                                    "(single clip), audio=%.4fs"
+                                    % (idx, decoded_frames, 0.0
+                                    if audio is None else audio["waveform"].shape[-1]
+                                                          / float(audio["sample_rate"])))
+                pbar.update_absolute(pos + 1, total_count)
+                del images
+                if audio is not None:
+                    del audio
+                continue
 
             if crossfade_active:
                 if decoded_frames < 2 * overlap:
@@ -412,6 +452,11 @@ class H3MotionContextClipStitcher:
                                     "(%.4fs), kept=%d, audio=%.4fs"
                                     % (idx, decoded_frames, overlap, overlap / float(fps),
                                        kept_frames, audio_sec))
+
+                # Advance the green progress bar once this clip is fully decoded and
+                # its parts have been appended to the stitched timeline.
+                pbar.update_absolute(pos + 1, total_count)
+
                 del images
                 if audio is not None:
                     del audio
@@ -427,22 +472,114 @@ class H3MotionContextClipStitcher:
 
         frame_count = int(final_images.shape[0])
         video_seconds = frame_count / float(fps)
-        audio_seconds = (final_audio["waveform"].shape[-1] / float(
-            final_audio["sample_rate"]) if final_audio is not None else 0.0)
+        audio_seconds = (final_audio["waveform"].shape[-1]
+                         / float(final_audio["sample_rate"])
+                         if final_audio is not None else 0.0)
 
         report_lines.append("TOTAL: %d frames = %.4fs at %.3f fps; audio=%.4fs%s"
                             % (frame_count, video_seconds, float(fps), audio_seconds,
                                "" if final_audio is not None
                                else " (no audio_vae connected)"))
         report = "\n".join(report_lines)
-        log_.info("H3 archive stitcher finished: %d frames (%.3fs), audio %.3fs",
+        log_.info("H3 clip stitcher finished: %d frames (%.3fs), audio %.3fs",
                   frame_count, video_seconds, audio_seconds)
 
         return final_images, final_audio, frame_count, report
 
 
+class _AVStreamPair:
+    """Minimal stand-in for a NestedTensor: wraps (video, audio) tensors and
+    exposes the unbind() interface that comfy-core's LTXVSeparateAVLatent
+    (and the H3 sampler code) expects. The wrapped tensors are always dense,
+    detached, contiguous copies, so they are safe to feed to the VAE kernels.
+    """
+
+    def __init__(self, video, audio):
+        self._parts = [video, audio]
+
+    def unbind(self):
+        # noinspection PyTypeChecker
+        return tuple(self._parts)
+
+    def __iter__(self):
+        return iter(self._parts)
+
+    def __len__(self):
+        return len(self._parts)
+
+
+class H3ContextLatentConverter:
+    """ Convert an H3 Motion Context archive latent (as loaded by
+    MiniMaxH3MotionContextLoadLatent, whose 'samples' is a plain list) into
+    the AV latent form that comfy-core's LTXVSeparateAVLatent expects
+    (av_latent["samples"].unbind() -> (video, audio)).
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"latent": ("LATENT", {
+            "tooltip": "An H3 AV latent, e.g. the output of "
+                       "MiniMaxH3MotionContextLoadLatent. Its 'samples' must be a "
+                       "NestedTensor or a (video, audio) pair."})}}
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION = "convert"
+    CATEGORY = "noEmbryo"
+    DESCRIPTION = ("Repackages the AV latent loaded from an H3 Motion Context clip "
+                   "archive into the nested (video, audio) form that "
+                   "LTXVSeparateAVLatent expects, so saved clips can be re-sampled, "
+                   "upscaled, or re-saved.")
+
+    @staticmethod
+    def convert(latent):
+        if not isinstance(latent, dict) or "samples" not in latent:
+            raise ValueError("h3_context_latent_converter: expected a latent dict with "
+                             "a 'samples' key, got %r" % type(latent))
+
+        out = dict(latent)
+        samples = latent["samples"]
+
+        if hasattr(samples, "unbind"):
+            parts = list(samples.unbind())
+        elif isinstance(samples, (tuple, list)):
+            parts = list(samples)
+        else:
+            raise ValueError("h3_context_latent_converter: 'samples' is neither "
+                             "unbindable nor a (video, audio) pair, got %r"
+                             % type(samples))
+
+        if len(parts) < 2:
+            raise ValueError("h3_context_latent_converter: latent has no audio "
+                             "stream (only %d part(s)); expected an H3 AV latent."
+                             % len(parts))
+
+        expected_ndim = {"video": (4, 5), "audio": (3, 4)}
+        names = ("video", "audio")
+        dense = []
+        for name, t in zip(names, parts[:2]):
+            if t.ndim not in expected_ndim[name]:
+                raise ValueError("h3_context_latent_converter: %s stream has "
+                                 "unexpected shape %s." % (name, tuple(t.shape)))
+            if not torch.is_floating_point(t):
+                raise ValueError("h3_context_latent_converter: %s stream is not a "
+                                 "float tensor (dtype %s)." % (name, t.dtype))
+            # Force a real, dense, detached CPU copy: views into packed storage
+            # (or tensors still carrying nested metadata) can make VAE CUDA
+            # kernels crash with cudaErrorIllegalAddress.
+            dense.append(t.detach().to("cpu", copy=True).contiguous())
+
+        converted = {k: v for k, v in out.items() if k != "samples"}
+        converted["samples"] = _AVStreamPair(dense[0], dense[1])
+        return (converted,)
+
+
 NODE_CLASS_MAPPINGS = {
-    "H3MotionContextClipStitcher": H3MotionContextClipStitcher, }
+    "H3MotionContextClipStitcher": H3MotionContextClipStitcher,
+    "H3ContextLatentConverter": H3ContextLatentConverter,
+}
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "H3MotionContextClipStitcher": "H3 Motion Context Clip Stitcher", }
+    "H3MotionContextClipStitcher": "H3 Motion Context Clip Stitcher",
+    "H3ContextLatentConverter": "H3 Context Latent Converter",
+}
