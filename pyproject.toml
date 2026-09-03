@@ -5,13 +5,14 @@ A collection of nodes for ComyUI. \n
 * "Load Image (from path)" lets you load an image from any path in your computer or a URL, and use a selection rectangle at the preview to crop it. It can also
 limit the output's size in megapixels. \n
 * "H3 Motion Context Clip Stitcher" concatenates H3 Motion Context clip archives. \n
+* "H3 Motion Context Clip Purge" clears all H3 Motion Context clip archives. \n
 * "JsonPromptLoader" enhances a propt using a .json file with `item:prompt` pairs. \n
 * "Resolution Scale" resizes an image using pixels or scale factor. \n
 * "Regex Text Chopper" cuts text based on regex. \n
 * "PromptTermList (1-6)" nodes to help with the creation of Prompts. \n
 * "Auto Save Workflow" can save the current workflow to a .json file automatically. \n
 """
-version = "1.6.5"
+version = "1.6.6"
 license = {text = "MIT License"}
 
 [project.urls]
@@ -20,5 +21,5 @@ Repository = "https://github.com/noembryo/ComfyUI-noEmbryo"
 
 [tool.comfy]
 PublisherId = "noembryo"
-DisplayName = "noEmbryo"
+DisplayName = "noEmbryoNodes"
 Icon = "https://iili.io/JmSdmAJ.png"

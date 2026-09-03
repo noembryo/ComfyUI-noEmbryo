@@ -9,6 +9,7 @@ into Motion Context.
 The archive format is the sampler output, and this node is a final-media assembly tool.
 """
 
+import fnmatch
 import glob
 import logging
 import os
@@ -134,8 +135,7 @@ def _decode_audio(audio_vae, audio_latent):
     audio = audio_vae.decode(audio_latent)
     # Current ComfyUI audio VAE returns [B,L,C]. Convert to [B,C,L].
     if audio.ndim != 3:
-        raise RuntimeError("H3 audio VAE returned unexpected shape %s"
-                           % (tuple(audio.shape),))
+        raise RuntimeError("H3 audio VAE returned unexpected shape %s" % (tuple(images.shape),))
     audio = audio.movedim(-1, 1)
     sr = int(getattr(audio_vae, "audio_sample_rate_output",
                      getattr(audio_vae, "audio_sample_rate", 32000)))
@@ -574,12 +574,100 @@ class H3ContextLatentConverter:
         return (converted,)
 
 
+class H3MotionContextClipPurge:
+    """ Delete the saved H3 Motion Context clip archive files from a folder.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"mode": ("BOOLEAN", {"default": True,
+            "label_on": "Purge", "label_off": "Preview (dry run)",
+            "tooltip": "Purge (Enabled): delete the matching files.\n"
+                       "Preview (dry run, Disabled): delete nothing; the report "
+                       "just lists the files that would be deleted."}),
+            "folder": ("STRING", {"default": "h3_context",
+            "tooltip": "Folder whose root-level clip archives will be deleted.\n"
+                       "Absolute paths and paths relative to ComfyUI/output are "
+                       "accepted."}),
+            "pattern": ("STRING", {"default": "clip_*.safetensors",
+                "tooltip": "Filename glob. Only root-level FILES matching this "
+                           "pattern are deleted.\nSub-folders are never touched."}), },
+            "hidden": {"mode": "BOOLEAN"}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("report",)
+    FUNCTION = "purge"
+    CATEGORY = "noEmbryo"
+    OUTPUT_NODE = True
+    DESCRIPTION = ("Deletes the numbered h3_motion_context_av_v1 clip archive files "
+                   "at the root of a folder (default: h3_context).\n"
+                   "Purge (Enabled): deletes the files.\n"
+                   "Preview (Disabled): dry run - the report only lists what would "
+                   "be deleted.\nOnly files matching the pattern are removed; "
+                   "sub-folders and everything inside them are left untouched.")
+
+    # noinspection PyUnusedLocal
+    @classmethod
+    def IS_CHANGED(cls, mode, folder, pattern):
+        return float("NaN")
+
+    @staticmethod
+    def purge(mode, folder, pattern):
+        d = _resolve_folder(folder)
+        pattern = (pattern or "clip_*.safetensors").strip()
+
+        doomed = []
+        for entry in os.scandir(d):
+            if entry.is_file(follow_symlinks=False) and not entry.is_dir():
+                if fnmatch.fnmatch(entry.name, pattern):
+                    doomed.append((entry.name, entry.stat().st_size))
+
+        if not mode:  # Preview (dry run)
+            lines = ["H3 clip purge (DRY RUN) in %s - nothing was deleted:" % d]
+            lines += ["  would delete: %s (%s)" % (name, _fmt_size(size))
+                      for name, size in doomed] or ["  no matching files."]
+            lines.append("TOTAL: %d file(s), %s" %
+                         (len(doomed), _fmt_size(sum(s for _, s in doomed))))
+            report = "\n".join(lines)
+            log_.info(report)
+            return (report,)
+
+        deleted = 0
+        freed = 0
+        lines = ["H3 clip purge in %s:" % d]
+        for name, size in doomed:
+            try:
+                os.remove(os.path.join(d, name))
+                deleted += 1
+                freed += size
+                lines.append("  deleted: %s (%s)" % (name, _fmt_size(size)))
+            except OSError as e:
+                lines.append("  FAILED to delete %s: %s" % (name, e))
+        if not deleted and not doomed:
+            lines.append("  no matching files.")
+        lines.append("TOTAL: deleted %d file(s), freed %s" %
+                     (deleted, _fmt_size(freed)))
+        report = "\n".join(lines)
+        log_.info(report)
+        return (report,)
+
+
+def _fmt_size(num_bytes):
+    size = float(num_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024.0:
+            return "%.1f %s" % (size, unit)
+        size /= 1024.0
+    return "%.1f TiB" % size
+
+
 NODE_CLASS_MAPPINGS = {
     "H3MotionContextClipStitcher": H3MotionContextClipStitcher,
     "H3ContextLatentConverter": H3ContextLatentConverter,
+    "H3MotionContextClipPurge": H3MotionContextClipPurge,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3MotionContextClipStitcher": "H3 Motion Context Clip Stitcher",
     "H3ContextLatentConverter": "H3 Context Latent Converter",
+    "H3MotionContextClipPurge": "H3 Motion Context Clip Purge",
 }

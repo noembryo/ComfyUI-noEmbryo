@@ -1,8 +1,11 @@
 # noEmbryo Nodes
 A diverse set of nodes for ComfyUI.  
 - [Json Prompt Loader](#json-prompt-loader)
+- [Load Image (from path)](#load-image-from-path)
 - [Resolution Scale](#resolution-scale)
 - [Regex Text Chopper](#regex-text-chopper)
+- [H3 Motion Context Clip Stitcher](#h3-motion-context-clip-stitcher)
+- [H3 Motion Context Clip Purge](#h3-motion-context-clip-purge)
 - [Auto Save Workflow](#auto-save-workflow)
 - [PromptTermList (1-6)](#prompttermlist-1-6)
 
@@ -141,6 +144,23 @@ No quality loss, like when trying to concatenate encoded videos.
   - **audio**: The final audio stream to be saved
   - **frame_count**: The total number of frames
   - **report**: Logging of some of the node's actions
+
+---
+## H3 Motion Context Clip Purge
+![H3MotionContextClipPurge.png](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/refs/heads/master/stuff/H3MotionContextClipPurge.png)
+Deletes the numbered `h3_motion_context_av_v1` clip archive files at the root of a folder (default: `h3_context`)  
+Only files matching the pattern are removed; sub-folders and everything inside them are left untouched.
+
+- **Controls**
+  - **mode**: Purge (Enabled): delete the matching files.  
+    Preview (dry run, Disabled): delete nothing; the report just lists the files that would be deleted.
+  - **folder** is the folder whose root-level clip archives will be deleted.  
+    Absolute paths and paths relative to ComfyUI/output are accepted.
+  - **pattern** is the filename glob. Only root-level FILES matching this pattern are deleted.  
+    Sub-folders are never touched.
+- **Outputs**
+  - **report**: Shows the actions of the node.
+
 
 
 ---

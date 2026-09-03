@@ -19,12 +19,14 @@ from server import PromptServer
 
 
 def _is_url(s) -> bool:
-    """Return True if s looks like an HTTP(S) URL."""
+    """ Return True if s looks like an HTTP(S) URL.
+    """
+    # noinspection HttpUrlsUsage
     return isinstance(s, str) and (s.startswith("http://") or s.startswith("https://"))
 
 
 def _fetch_url_bytes(url: str, timeout: float = 30.0) -> bytes:
-    """Download the bytes of a URL. Raises on any network/HTTP problem.
+    """ Download the bytes of a URL. Raises on any network/HTTP problem.
 
     Embedded Python distributions (StabilityMatrix, ComfyUI portable, ...) often
     ship with a missing or outdated CA bundle, causing CERTIFICATE_VERIFY_FAILED
@@ -46,6 +48,7 @@ def _fetch_url_bytes(url: str, timeout: float = 30.0) -> bytes:
 
     # Strategy 2: use certifi's CA bundle if it's installed.
     try:
+        # noinspection PyUnresolvedReferences
         import certifi
         ctx = ssl.create_default_context(cafile=certifi.where())
         opener = build_opener(HTTPSHandler(context=ctx))
@@ -66,6 +69,7 @@ def _fetch_url_bytes(url: str, timeout: float = 30.0) -> bytes:
               "downloads without certificate validation. Consider installing/"
               "updating the 'certifi' package for secure downloads.")
         _ssl_warning_shown = True
+    # noinspection PyUnresolvedReferences,PyProtectedMember
     ctx = ssl._create_unverified_context()
     opener = build_opener(HTTPSHandler(context=ctx))
     with opener.open(req, timeout=timeout) as resp:

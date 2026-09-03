@@ -4,17 +4,18 @@ from os.path import realpath, join, dirname, isabs, splitext, basename
 from datetime import datetime
 import folder_paths
 from .load_image_from_path import LoadImageFromPathEnhanced
-from .stitcher import H3MotionContextClipStitcher, H3ContextLatentConverter
+from .stitcher import (H3MotionContextClipStitcher, H3ContextLatentConverter,
+                       H3MotionContextClipPurge)
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (1, 6, 5),
+            "version": (1, 6, 6),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.6.5"
+__version__ = "1.6.6"
 
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 
@@ -481,6 +482,7 @@ NODE_CLASS_MAPPINGS = {f"JsonPromptLoader -{__author__}": JsonPromptLoader,
                        f"Auto Save Workflow -{__author__}": AutoSaveWorkflow,
                        f"Load Image (from path) -{__author__}": LoadImageFromPathEnhanced,
                        f"H3MotionContextClipStitcher -{__author__}": H3MotionContextClipStitcher,
+                       f"H3MotionContextClipPurge -{__author__}": H3MotionContextClipPurge,
                        f"H3ContextLatentConverter -{__author__}": H3ContextLatentConverter,
                        "PromptTermList1": PromptTermList1,
                        "PromptTermList2": PromptTermList2,
@@ -496,6 +498,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {f"JsonPromptLoader -{__author__}": f"Json Prompt L
                               f"Auto Save Workflow -{__author__}": f"Auto Save Workflow /{__author__}",
                               f"Load Image (from path) -{__author__}": f"Load Image (from path) /{__author__}",
                               f"H3MotionContextClipStitcher -{__author__}": f"H3 Motion Context Clip Stitcher /{__author__}",
+                              f"H3MotionContextClipPurge -{__author__}": f"H3 Motion Context Clip Purge /{__author__}",
                               f"H3ContextLatentConverter -{__author__}": f"H3 Context Latent Converter /{__author__}",
                               "PromptTermList1": f"PromptTermList 1 /{__author__}",
                               "PromptTermList2": f"PromptTermList 2 /{__author__}",
