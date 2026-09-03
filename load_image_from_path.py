@@ -3,9 +3,11 @@ import io
 import os
 import json
 import shutil
+import ssl
 from pathlib import Path
 from typing import Iterable
-from urllib.request import urlopen, Request
+from urllib.request import urlopen, Request, build_opener, HTTPSHandler
+from urllib.error import URLError
 
 from PIL import (Image, ImageOps, ImageSequence, ImageFile, UnidentifiedImageError, )
 import numpy as np
@@ -22,10 +24,55 @@ def _is_url(s) -> bool:
 
 
 def _fetch_url_bytes(url: str, timeout: float = 30.0) -> bytes:
-    """Download the bytes of a URL. Raises on any network/HTTP problem."""
+    """Download the bytes of a URL. Raises on any network/HTTP problem.
+
+    Embedded Python distributions (StabilityMatrix, ComfyUI portable, ...) often
+    ship with a missing or outdated CA bundle, causing CERTIFICATE_VERIFY_FAILED
+    errors on perfectly valid sites. Strategy:
+      1. Try a normal verified request.
+      2. On SSL verification failure, retry with the `certifi` CA bundle if the
+         package is available (verification still active, just better roots).
+      3. As a last resort, retry without certificate verification, warning once.
+    """
     req = Request(url, headers={"User-Agent": "ComfyUI-noEmbryo/1.0"})
-    with urlopen(req, timeout=timeout) as resp:
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except URLError as e:
+        # urlopen wraps the raw SSL error inside URLError as its `.reason`.
+        if not isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError):
+            raise  # a genuine network error — don't mask it
+        # fall through to the recovery strategies below
+
+    # Strategy 2: use certifi's CA bundle if it's installed.
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        opener = build_opener(HTTPSHandler(context=ctx))
+        with opener.open(req, timeout=timeout) as resp:
+            return resp.read()
+    except ImportError:
+        pass
+    except Exception as e:
+        reason = getattr(e, "reason", e)
+        if not isinstance(reason, ssl.SSLCertVerificationError):
+            raise  # genuine network error between retries — re-raise
+        pass  # certifi roots didn't help either — fall through
+
+    # Strategy 3 (last resort): skip certificate validation entirely.
+    global _ssl_warning_shown
+    if not _ssl_warning_shown:
+        print("[noEmbryo] SSL certificate verification failed — retrying URL "
+              "downloads without certificate validation. Consider installing/"
+              "updating the 'certifi' package for secure downloads.")
+        _ssl_warning_shown = True
+    ctx = ssl._create_unverified_context()
+    opener = build_opener(HTTPSHandler(context=ctx))
+    with opener.open(req, timeout=timeout) as resp:
         return resp.read()
+
+
+_ssl_warning_shown = False
 
 
 def _pillow(fn, arg):
