@@ -11,14 +11,14 @@ from .minimax import (H3MotionContextClipStitcher, H3ClipRefiner,
                        H3MotionContextClipPurge, H3AVLatentFromVideo)
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (1, 6, 6),
+            "version": (1, 8, 0),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.6.6"
+__version__ = "1.8.0"
 
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 
@@ -81,6 +81,9 @@ class JsonPromptLoader:
     RETURN_NAMES = ("Prompt",)
     FUNCTION = "run"
     CATEGORY = "noEmbryo/Prompt"
+    DESCRIPTION = ("A node that can load a `.json` file with `item:prompt` pairs and outputs "
+                   "the selected item's prompt, while combining it with a custom prompt.\n"
+                   "It can load `.json` files from any directory, not just the node's directory.")
 
     def run(self, json_path, selected_item, variable, custom_prompt):
         self.load_data(json_path)

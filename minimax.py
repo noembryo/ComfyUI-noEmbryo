@@ -673,58 +673,6 @@ class H3MotionContextClipStitcher:
         return final_images, final_audio, frame_count, report
 
 
-# --- Contrast measurement helpers for inline H3ClipRefiner ---
-
-def _contrast_measure_luminance(frames):
-    """Compute per-frame luminance contrast (std of luminance) for [N,H,W,3] frames in 0..1.
-    Returns [N] tensor of contrast values."""
-    # Luminance = 0.2126*R + 0.7152*G + 0.0722*B
-    lum = (frames[..., 0] * 0.2126 + frames[..., 1] * 0.7152 + frames[..., 2] * 0.0722)
-    # Contrast = std of luminance per frame
-    return lum.reshape(lum.shape[0], -1).std(dim=1)
-
-
-def _contrast_correct_frames(frames, head_contrast, tail_contrast, strength):
-    """Apply contrast correction to frames to undo the contrast drift.
-    
-    The denoiser typically changes contrast from head to tail (usually increases it).
-    We measure the contrast ratio (tail/head) and scale luminance to bring tail
-    contrast back to head level.
-    
-    frames: [N,H,W,3] in 0..1
-    head_contrast: mean contrast of first N frames
-    tail_contrast: mean contrast of last N frames
-    strength: 0..1, how much of the correction to apply (1.0 = full correction to head level)
-    Returns corrected frames.
-    """
-    if head_contrast <= 1e-6 or tail_contrast <= 1e-6:
-        return frames
-    
-    # Contrast ratio: tail/head. 
-    #   ratio > 1  -> contrast increases (degradation), need to reduce
-    #   ratio < 1  -> contrast drops, need to boost
-    ratio = tail_contrast / head_contrast
-    
-    # Target correction factor: 1/ratio brings tail contrast to head level.
-    # Interpolate between 1.0 (no correction) and 1/ratio (full correction).
-    correction = 1.0 + (1.0 / ratio - 1.0) * strength
-    correction = max(0.5, min(2.0, correction))  # clamp for safety
-    
-    # Apply contrast correction in luminance space
-    # Convert to luminance, scale around mean, convert back
-    lum = (frames[..., 0] * 0.2126 + frames[..., 1] * 0.7152 + frames[..., 2] * 0.0722)
-    lum_mean = lum.mean(dim=(1, 2), keepdim=True)
-    lum_corrected = lum_mean + (lum - lum_mean) * correction
-    
-    # Reconstruct RGB: preserve chroma by scaling RGB proportionally
-    # This is an approximation - proper way would be Lab space
-    scale = torch.where(lum > 1e-6, lum_corrected / lum, torch.ones_like(lum))
-    scale = scale.unsqueeze(-1)
-    corrected = frames * scale
-    
-    return corrected.clamp_(0.0, 1.0)
-
-
 class H3ClipRefiner:
     """ Inline texture-ratchet correction node for H3 Motion Context clips.
 
@@ -751,7 +699,7 @@ class H3ClipRefiner:
     match the target band_ratio. Low-frequency structure (scene content) is
     bit-identical preserved. No VAE decode/encode needed for the correction.
 
-    TO MAKE IT LESS GRAINY: If a clip measures at 0.3917 and you want it less
+    TO MAKE IT LESS GRAINY: If a clip measures at 0.3917, and you want it less
     grainy, set target_ratio to a LOWER value (e.g., 0.3800). The lower the
     target_ratio, the more the high-band grain is reduced.
     """
