@@ -1,7 +1,7 @@
 import os, re, io
 import json
-import subprocess
-import tempfile
+# import subprocess
+# import tempfile
 from os.path import realpath, join, dirname, isabs, splitext, basename
 from datetime import datetime
 import folder_paths
@@ -11,14 +11,14 @@ from .minimax import (H3MotionContextClipStitcher, H3ClipRefiner,
                        H3MotionContextClipPurge, H3AVLatentFromVideo)
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (1, 8, 1),
+            "version": (1, 8, 2),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.8.1"
+__version__ = "1.8.2"
 
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 
