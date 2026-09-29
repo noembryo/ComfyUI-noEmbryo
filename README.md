@@ -1,18 +1,22 @@
 # noEmbryo Nodes
-A diverse set of nodes for ComfyUI.  
-- [Json Prompt Loader](#json-prompt-loader)
-- [Load Image (from path)](#load-image-from-path)
-- [Resolution Scale](#resolution-scale)
-- [Regex Text Chopper](#regex-text-chopper)
-- [H3 Motion Context Clip Stitcher](#h3-motion-context-clip-stitcher)
-- [H3 Motion Context Clip Purge](#h3-motion-context-clip-purge)
-- [Auto Save Workflow](#auto-save-workflow)
-- [PromptTermList (1-6)](#prompttermlist-1-6)
 
+[![made-with-python][Python]](https://www.python.org/) [![License: MIT][MIT]](LICENSE)  
+A diverse set of nodes for ComfyUI.  
 You can access them through "Add node > noEmbryo" submenu.  
 
-[![made-with-python][Python]](https://www.python.org/)
-[![License: MIT][MIT]](LICENSE)
+  * [Json Prompt Loader](#json-prompt-loader)
+  * [Load Image (from path)](#load-image-from-path)
+  * [Image Composer](#image-composer)
+  * [Resolution Scale](#resolution-scale)
+  * [Regex Text Chopper](#regex-text-chopper)
+  * [H3 Motion Context Clip Stitcher](#h3-motion-context-clip-stitcher)
+  * [H3 Clip Refiner](#h3-clip-refiner)
+  * [H3 Motion Context Clip Purge](#h3-motion-context-clip-purge)
+  * [H3 AV Latent from Video](#h3-av-latent-from-video)
+  * [H3 Context Latent Converter](#h3-context-latent-converter)
+  * [Auto Save Workflow](#auto-save-workflow)
+  * [PromptTermList 1-6](#prompttermlist-1-6)
+  * [Installation](#installation)
 
 ---
 ## Json Prompt Loader
@@ -254,34 +258,6 @@ Encodes a whole video (IMAGE frames + AUDIO) with the MiniMax H3 VAEs into an AV
 ## H3 Context Latent Converter
 
 A utility node that converts an `H3 Motion Context` archive latent (as loaded by `MiniMaxH3MotionContextLoadLatent`, whose 'samples' is a plain list) into the AV latent form that comfy-core's `LTXVSeparateAVLatent` expects (av_latent["samples"].unbind() -> (video, audio)).
-
-
-
----
-
-## Replace Audio no Re-Encode
-
-![ReplaceAudioNoReEncode](https://github.com/noembryo/ComfyUI-noEmbryo/blob/master/stuff/ReplaceAudioNoReEncode.png?raw=true)  
-A minimal ComfyUI custom node that replaces the audio stream of an existing video file with a new audio track, using ffmpeg's stream-copy mode for the video (`-c:v copy`). The video bitstream is remuxed losslessly and is never decoded/re-encoded, only the container is rewritten with a new audio stream. Requires ffmpeg to be installed and available on PATH.
-
-- **Input**
-  - **audio**: ComfyUI AUDIO signal (e.g. from Load Audio or a generated audio node) to use as the new audio stream.  
-    Ignored if audio_path is set.
-  
-- **Output**
-  - **video_path** returns the path where the video is saved in text.
-
-- **Controls**
-  - **video_path** Path to the video file whose audio stream will be replaced (e.g. any .mp4/.mov/.mkv on disk).
-  - **filename_prefix** Prefix for the output file name.  
-    The result is saved in the ComfyUI output directory as: <prefix>_<video name>_<counter>.<ext>
-  - **audio_codec** How to encode the new audio stream:
-    - aac: re-encode to AAC 192kbps (always used when the audio comes from the audio input)
-    - copy: remux the audio file losslessly, without re-encoding (only meaningful when using the audio_path input)"
-  - **audio_path** Path to an audio file, or a video file, whose audio stream will be extracted, to be used as the new audio stream.  
-    If set, it takes priority over the audio input.
-
-
 
 
 ---
