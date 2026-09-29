@@ -6,6 +6,35 @@ import {api} from "../../scripts/api.js";
 // Store last browsed path
 let lastBrowsedPath = '';
 
+// Registry of ImageComposer nodes for global graph change notifications
+const composerNodes = new Set();
+
+// Global graph change listener — fires when ANY connection changes in the graph.
+// This catches upstream bypasses (e.g. disconnecting a loader from a KJ Set node)
+// that don't trigger the Composer's own onConnectionsChange.
+let graphChangeHandlerInstalled = false;
+function installGraphChangeListener() {
+    if (graphChangeHandlerInstalled) return;
+    graphChangeHandlerInstalled = true;
+    // ComfyUI's LGraphCanvas fires "graphchange" on the canvas when connections change.
+    // We hook into the canvas to catch all connection changes.
+    const canvas = app.canvas;
+    if (canvas) {
+        const prevOnGraphChange = canvas.onGraphChange;
+        canvas.onGraphChange = function () {
+            const r = prevOnGraphChange?.apply(this, arguments);
+            // Notify all Composer nodes to refresh thumbnails
+            for (const node of composerNodes) {
+                if (node.refreshThumbs) {
+                    node.refreshThumbs();
+                    node.setDirtyCanvas?.(true, true);
+                }
+            }
+            return r;
+        };
+    }
+}
+
 /** Return the directory of a path string (handles Windows/Unix + [input]/[output]/[temp] suffixes). */
 function dirnameOf(pathStr) {
     if (!pathStr || typeof pathStr !== 'string') return '';
@@ -553,6 +582,762 @@ const MIN_EDITOR_H = 80;
 const RESIZE_ZONE = 15;
 const PREVIEW_TOOLTIP =
     "Drag to crop · Drag inside to move · Drag corners to resize · Click outside selection to clear · Click ↻ to rotate 90°";
+
+// ---------------------------------------------------------------------------
+// Image Composer — growing IMAGE inputs and a live arrangement preview.
+// Mirrors the backend's natural-mode skyline packing (image_nodes.py).
+// ---------------------------------------------------------------------------
+
+const IC_MAX_IMAGES = 16;
+const IC_ALIGN = 16;
+const IC_PACK_ASPECT_MIN = 0.45;
+const IC_PACK_ASPECT_MAX = 2.2;
+const IC_PACK_WIDTH_STEPS = 48;
+const IC_EPS = 1e-9;
+const IC_BACKGROUNDS = { black: "#000", grey: "#808080", white: "#fff" };
+
+// Direct port of the backend skyline packer.
+function icSkylinePack(sizes, width, gap) {
+    const sky = [[0, width, 0]];
+    const placed = [];
+    for (const [w, h] of sizes) {
+        const iw = w + gap, ih = h + gap;
+        if (iw > width + IC_EPS) return null;
+        let best = null;
+        for (let i = 0; i < sky.length; i++) {
+            const start = sky[i][0];
+            if (start + iw > width + IC_EPS) continue;
+            let y = 0, span = iw, j = i;
+            while (span > IC_EPS && j < sky.length) {
+                if (sky[j][2] > y) y = sky[j][2];
+                span -= sky[j][1];
+                j++;
+            }
+            if (span > IC_EPS) continue;
+            if (best === null || y < best[0] || (y === best[0] && start < best[1]))
+                best = [y, start];
+        }
+        if (best === null) return null;
+        const [y, x] = best;
+        placed.push([x, y, w, h]);
+        const cut = [], end = x + iw;
+        for (const [sx, sw, sy] of sky) {
+            if (sx + sw <= x + IC_EPS || sx >= end - IC_EPS) { cut.push([sx, sw, sy]); continue; }
+            if (sx < x) cut.push([sx, x - sx, sy]);
+            if (sx + sw > end) cut.push([end, sx + sw - end, sy]);
+        }
+        cut.push([x, iw, y + ih]);
+        cut.sort((a, b) => a[0] - b[0]);
+        const merged = [];
+        for (const seg of cut) {
+            if (merged.length && Math.abs(merged[merged.length - 1][2] - seg[2]) < IC_EPS)
+                merged[merged.length - 1][1] += seg[1];
+            else merged.push([...seg]);
+        }
+        sky.length = 0;
+        sky.push(...merged);
+    }
+    const w0 = Math.max(...placed.map((p) => p[0] + p[2]));
+    const h0 = Math.max(...placed.map((p) => p[1] + p[3]));
+    return [placed, w0, h0];
+}
+
+function icPackSweep(sizes, gap) {
+    const used = sizes.reduce((s, [w, h]) => s + w * h, 0);
+    const lo = Math.max(...sizes.map((s) => s[0])) + gap;
+    const hi = sizes.reduce((s, [w]) => s + w, 0) + gap * sizes.length;
+    const idx = sizes.map((_, i) => i);
+    const orders = [
+        idx,
+        [...idx].sort((a, b) => sizes[b][1] - sizes[a][1] || a - b),
+        [...idx].sort((a, b) => sizes[b][0] - sizes[a][0] || a - b),
+        [...idx].sort((a, b) =>
+            sizes[b][0] * sizes[b][1] - sizes[a][0] * sizes[a][1] || a - b),
+    ];
+    // Quantized score for exact backend parity.
+    const q = (v) => Math.floor(v * 1e9 + 0.5);
+    let found = null;
+    for (const order of orders) {
+        const ordered = order.map((i) => sizes[i]);
+        let best = null;
+        for (let step = 0; step < IC_PACK_WIDTH_STEPS; step++) {
+            const width = lo + ((hi - lo) * step) / (IC_PACK_WIDTH_STEPS - 1);
+            const got = icSkylinePack(ordered, width, gap);
+            if (!got) continue;
+            const [placed, w0, h0] = got;
+            const fill = used / (w0 * h0);
+            const aspect = w0 / h0;
+            if (aspect < IC_PACK_ASPECT_MIN || aspect > IC_PACK_ASPECT_MAX) continue;
+            const key = [-q(fill), q(Math.abs(Math.log(aspect))), -q(aspect)];
+            if (best === null || icKeyLess(key, best.key)) {
+                best = { key, placed, w0, h0, order };
+            }
+        }
+        if (best && (!found || icKeyLess(best.key, found.key))) found = best;
+    }
+    if (!found) return null;
+    const boxes = new Array(sizes.length).fill(null);
+    found.order.forEach((slot, i) => { boxes[slot] = found.placed[i]; });
+    return { boxes, w0: found.w0, h0: found.h0 };
+}
+
+function icKeyLess(a, b) {
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return a[i] < b[i];
+    }
+    return false;
+}
+
+// Mirror of the backend's _ic_plan_natural (integer canvas, shared scale <= 1).
+// Includes the half-gap frame around the sheet, as the backend does.
+function icPlanNatural(sizes, gap) {
+    const packed = icPackSweep(sizes, gap);
+    if (!packed) return null;
+    const { boxes, w0, h0 } = packed;
+    const alignUp = (v) => Math.max(IC_ALIGN, Math.ceil(v / IC_ALIGN) * IC_ALIGN);
+    // Frame of gap/2 around the whole sheet; 0 when gap is 0.
+    const frame = Math.round(gap / 2);
+    let width = alignUp(w0);
+    let height = alignUp(h0);
+    const out = boxes.map(([x, y, w, h]) => {
+        const bw = Math.max(1, Math.round(w));
+        const bh = Math.max(1, Math.round(h));
+        return [Math.round(x), Math.round(y), bw, bh];
+    });
+    // Expand the canvas by the frame and shift every box inward by it.
+    width += 2 * frame;
+    height += 2 * frame;
+    for (const b of out) {
+        b[0] += frame;
+        b[1] += frame;
+    }
+    return { width, height, boxes: out };
+}
+
+app.registerExtension({
+    name: "noEmbryo.ImageComposer",
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== "Image Composer -noEmbryo") return;
+
+        const onNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            const result = onNodeCreated
+                ? onNodeCreated.apply(this, arguments)
+                : undefined;
+            const node = this;
+
+            const mpWidget = node.widgets.find((w) => w.name === "max_megapixels");
+            const gapWidget = node.widgets.find((w) => w.name === "gap");
+            const bgWidget = node.widgets.find((w) => w.name === "background");
+
+            // Hide the managed widget (canvas + Nodes 2.0).
+            for (const w of [mpWidget]) {
+                if (w) {
+                    w.hidden = true;
+                    w.options = w.options || {};
+                    w.options.hidden = true;
+                }
+            }
+
+            const state = { thumbs: new Map(), box: null };
+
+            // Register this Composer node for global graph change notifications
+            composerNodes.add(node);
+            // Expose refreshThumbs on the node so the global listener can call it
+            node.refreshThumbs = refreshThumbs;
+            // Clean up registry when node is removed
+            const prevOnRemoved = node.onRemoved;
+            node.onRemoved = function () {
+                composerNodes.delete(node);
+                return prevOnRemoved?.apply(this, arguments);
+            };
+            // Install global graph change listener (once)
+            installGraphChangeListener();
+
+            function connectedSlots() {
+                const slots = [];
+                for (let i = 1; i <= IC_MAX_IMAGES; i++) {
+                    const input = node.inputs?.find((inp) => inp.name === `image${i}`);
+                    if (input && input.link != null) slots.push(i);
+                }
+                return slots;
+            }
+
+            // Return only slots that have a valid upstream image path
+            // (not bypassed, not cleared). Used for preview packing to avoid
+            // showing numbered placeholders for disabled/bypassed GetNodes.
+            function validSlots() {
+                return connectedSlots().filter((i) => {
+                    const info = upstreamPath(i);
+                    return info && info.path;
+                });
+            }
+
+            // --- Growing inputs -----------------------------------------
+            // Keep exactly one trailing free slot: enough connected inputs
+            // to hold every link, plus one empty one to grow into.
+            function syncInputs() {
+                let connected = 0;
+                for (const inp of node.inputs || []) {
+                    if (inp.link != null) connected++;
+                }
+                const want = Math.min(IC_MAX_IMAGES, connected + 1);
+                // Remove trailing unconnected inputs beyond the wanted count.
+                while (node.inputs.length > want &&
+                       node.inputs[node.inputs.length - 1].link == null) {
+                    node.removeInput(node.inputs.length - 1);
+                }
+                // Add free slots until we reach the wanted count.
+                let n = node.inputs.length;
+                while (n < want) {
+                    n++;
+                    node.addInput(`image${n}`, "IMAGE");
+                }
+            }
+
+            const prevOnConn = nodeType.prototype.onConnectionsChange;
+            nodeType.prototype.onConnectionsChange = function (side, slot, connect) {
+                const r = prevOnConn?.apply(this, arguments);
+                if (side === 1) {
+                    syncInputs();
+                    refreshThumbs();
+                    if (!connect) {
+                        // Connection was broken — clean up thumbnail entries
+                        // for any inputs that are no longer connected so the
+                        // Composer doesn't keep showing the bypassed image.
+                        let cleaned = false;
+                        for (const [key, entry] of state.thumbs) {
+                            const i = Number(key);
+                            const inp = node.inputs?.find((w) => w.name === `image${i}`);
+                            if (!inp || inp.link == null) {
+                                state.thumbs.delete(key);
+                                cleaned = true;
+                            }
+                        }
+                        if (cleaned) node.setDirtyCanvas?.(true, true);
+                    }
+                }
+                return r;
+            };
+
+            // --- Thumbnail loading via the serve proxy -------------------
+            function upstreamPath(slotIdx) {
+                const input = node.inputs?.find((inp) => inp.name === `image${slotIdx}`);
+                if (!input || input.link == null) return null;
+                const link = app.graph.links[input.link];
+                if (!link) return null;
+                const src = app.graph._nodes_by_id?.[link.origin_id];
+                if (!src) return null;
+
+                console.log(`[ImageComposer] slot ${slotIdx}: src type=${src.type || "?"} ` +
+                    `widgets=${(src.widgets || []).map(w => w.name).join(",")}`);
+
+                // Direct connection: LoadImageFromPathEnhanced
+                const result = icExtractFromNode(src);
+                if (result) {
+                    console.log(`[ImageComposer] slot ${slotIdx}: direct match path=${result.path}`);
+                    return result;
+                }
+
+                // Intermediate nodes (e.g. KJ Set/Get): trace back
+                const traced = icTraceBack(src);
+                if (traced) {
+                    console.log(`[ImageComposer] slot ${slotIdx}: traced path=${traced.path}`);
+                } else {
+                    console.log(`[ImageComposer] slot ${slotIdx}: no trace result, ` +
+                        `checking widgets for paths...`);
+                    const fallbackPath = icFindPathInWidgets(src);
+                    if (fallbackPath) {
+                        console.log(`[ImageComposer] slot ${slotIdx}: fallback path=${fallbackPath}`);
+                        return { path: fallbackPath, rotation: 0, crop: null, maxMp: 0,
+                                 srcNode: src };
+                    }
+                }
+                return traced;
+            }
+
+            // Extract path/crop/maxMp from a LoadImageFromPathEnhanced node.
+            function icExtractFromNode(srcNode) {
+                // If the source node is bypassed (mode 4), treat as no valid source.
+                if (srcNode.mode === 4) return null;
+                const pathW = srcNode.widgets?.find((w) => w.name === "image");
+                const cropW = srcNode.widgets?.find((w) => w.name === "crop");
+                if (!pathW) return null;
+                let crop = null, rotation = 0;
+                try {
+                    const data = JSON.parse(cropW?.value || "{}") || {};
+                    rotation = parseInt(data.rotation, 10) || 0;
+                    if (data.w > 0 && data.h > 0)
+                        crop = { x: +data.x, y: +data.y, w: +data.w, h: +data.h };
+                } catch (e) { /* ignore */ }
+                // The upstream megapixel cap shapes the tensor the backend
+                // receives, so it must shape the packing too.
+                const mpW = srcNode.widgets?.find((w) => w.name === "max_megapixels");
+                const maxMp = Math.max(0, parseFloat(mpW?.value) || 0);
+                return { path: String(pathW.value || "").trim(), rotation, crop,
+                         maxMp, srcNode: srcNode };
+            }
+
+            // Generic fallback: check ALL widgets on a node for any string
+            // that looks like a file path or URL.
+            function icFindPathInWidgets(srcNode) {
+                for (const w of srcNode.widgets || []) {
+                    const v = String(w.value || "").trim();
+                    if (!v) continue;
+                    if (v.startsWith("/") || v.startsWith("http") ||
+                        v.endsWith(".png") || v.endsWith(".jpg") ||
+                        v.endsWith(".jpeg") || v.endsWith(".webp") ||
+                        v.endsWith(".bmp") || v.endsWith(".gif")) {
+                        return v;
+                    }
+                }
+                return null;
+            }
+
+            // Trace back through intermediate nodes to find the original
+            // LoadImageFromPathEnhanced source.
+            function icTraceBack(node) {
+                // Strategy 1: follow input links backward through the graph
+                for (const inp of node.inputs || []) {
+                    if (inp.link != null) {
+                        const l = app.graph.links[inp.link];
+                        if (l) {
+                            const src = app.graph._nodes_by_id?.[l.origin_id];
+                            if (src) {
+                                const result = icExtractFromNode(src);
+                                if (result) return result;
+                                const recursive = icTraceBack(src);
+                                if (recursive) return recursive;
+                            }
+                        }
+                    }
+                }
+
+                // Strategy 2: KJ GetNode — match key to find SetNode's source
+                const nodeType = node.type || "";
+                if (nodeType === "GetNode" || nodeType.includes("Get")) {
+                    const kjResult = icTraceThroughKJ(node);
+                    if (kjResult) return kjResult;
+                }
+
+                // Strategy 3: any widget on this node contains a path
+                const path = icFindPathInWidgets(node);
+                if (path) {
+                    return { path, rotation: 0, crop: null, maxMp: 0,
+                             srcNode: node };
+                }
+
+                return null;
+            }
+
+            // For a GetNode, find the matching SetNode by key,
+            // then trace to the node that feeds the SetNode's input.
+            function icTraceThroughKJ(getNode) {
+                // KJ nodes store the key in widgets[0] (first widget).
+                const keyW = getNode.widgets?.[0];
+                if (!keyW) return null;
+                const key = String(keyW.value ?? "");
+                if (!key) return null;
+
+                // Search for a SetNode with matching key
+                for (const nodeId in app.graph._nodes_by_id) {
+                    const n = app.graph._nodes_by_id[nodeId];
+                    if (n === getNode) continue;
+                    if (n.type !== "SetNode" && !n.type.includes("Set")) continue;
+                    // Found a SetNode — check if its key matches
+                    const setKeyW = n.widgets?.[0];
+                    if (!setKeyW) continue;
+                    if (String(setKeyW.value ?? "") !== key) continue;
+                    // If SetNode is bypassed (mode 4) or its input is disconnected,
+                    // the loader is effectively bypassed — don't return stale value.
+                    if (n.mode === 4) continue;
+                    if (!(n.inputs?.[0]?.link != null)) continue;
+                    // Key matches — follow SetNode's input (slot 0) to find source
+                    for (const inp of n.inputs || []) {
+                        if (inp.link != null) {
+                            const l = app.graph.links[inp.link];
+                            if (l) {
+                                const src = app.graph._nodes_by_id?.[l.origin_id];
+                                if (src) {
+                                    const result = icExtractFromNode(src);
+                                    if (result) return result;
+                                    const recursive = icTraceBack(src);
+                                    if (recursive) return recursive;
+                                }
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+
+            function loadThumb(slotIdx, entry) {
+                entry.seq = (entry.seq || 0) + 1;
+                const seq = entry.seq;
+                const p = entry.path;
+                if (!p) { entry.img = null; node.setDirtyCanvas?.(true, true); return; }
+                const url = /^https?:\/\//i.test(p)
+                    ? p
+                    : `/noembryo/serve_image?path=${encodeURIComponent(p)}` +
+                      `&t=${Date.now()}`;
+                const img = new Image();
+                img.onload = () => {
+                    if (entry.seq !== seq) return;
+                    // Backend order: ROTATE the full image first, THEN crop —
+                    // the crop coords are drawn on the rotated preview, so
+                    // they only map correctly onto the rotated image.
+                    let result = icRotate(img, entry.rotation);
+                    const c = entry.crop;
+                    if (c && c.w > 0 && c.h > 0) {
+                        const rw = result.width, rh = result.height;
+                        const cw = Math.max(1, Math.round(c.w * rw));
+                        const ch = Math.max(1, Math.round(c.h * rh));
+                        const cx = Math.max(0, Math.min(rw - 1,
+                            Math.round(c.x * rw)));
+                        const cy = Math.max(0, Math.min(rh - 1,
+                            Math.round(c.y * rh)));
+                        const cc = document.createElement("canvas");
+                        cc.width = cw;
+                        cc.height = ch;
+                        cc.getContext("2d").drawImage(result, cx, cy, cw, ch,
+                            0, 0, cw, ch);
+                        result = cc;
+                    }
+                    // Apply the upstream megapixel cap (downscale-only,
+                    // aspect-preserved — mirrors the backend behaviour).
+                    const mp = entry.maxMp;
+                    if (mp > 0) {
+                        const maxPixels = mp * 1024 * 1024;
+                        const cur = result.width * result.height;
+                        if (cur > maxPixels) {
+                            const sc = Math.sqrt(maxPixels / cur);
+                            const sc2 = document.createElement("canvas");
+                            sc2.width = Math.max(1, Math.round(result.width * sc));
+                            sc2.height = Math.max(1, Math.round(result.height * sc));
+                            sc2.getContext("2d").drawImage(
+                                result, 0, 0, sc2.width, sc2.height);
+                            result = sc2;
+                        }
+                    }
+                    entry.img = result;
+                    node.setDirtyCanvas?.(true, true);
+                };
+                img.onerror = () => {
+                    if (entry.seq !== seq) return;
+                    entry.img = null;
+                    node.setDirtyCanvas?.(true, true);
+                };
+                img.src = url;
+            }
+
+            function icRotate(src, deg) {
+                const d = ((deg % 360) + 360) % 360;
+                if (!d) return src;
+                const c = document.createElement("canvas");
+                const quarter = (d / 90) % 4;
+                if (quarter % 2 === 1) { c.width = src.height; c.height = src.width; }
+                else { c.width = src.width; c.height = src.height; }
+                const ctx = c.getContext("2d");
+                ctx.translate(c.width / 2, c.height / 2);
+                ctx.rotate((d * Math.PI) / 180);
+                ctx.drawImage(src, -src.width / 2, -src.height / 2);
+                return c;
+            }
+
+            function refreshThumbs() {
+                for (const i of connectedSlots()) {
+                    const info = upstreamPath(i);
+                    const entry = state.thumbs.get(i) || {};
+                    state.thumbs.set(i, entry);
+                    if (info && info.path) {
+                        const cropKey = `${info.crop ? JSON.stringify(info.crop) : ""}` +
+                            `|${info.maxMp}`;
+                        if (entry.path !== info.path ||
+                            entry.rotation !== info.rotation ||
+                            entry.cropKey !== cropKey) {
+                            entry.path = info.path;
+                            entry.rotation = info.rotation;
+                            entry.crop = info.crop;
+                            entry.maxMp = info.maxMp;
+                            entry.cropKey = cropKey;
+                            loadThumb(i, entry);
+                        }
+                    } else if (!info) {
+                        state.thumbs.delete(i);
+                    } else if (!info.path) {
+                        // Upstream exists but path is empty (loader cleared).
+                        // Drop the stale thumbnail so the Composer doesn't
+                        // keep showing the last received image.
+                        if (entry && entry.path) {
+                            entry.path = "";
+                            entry.img = null;
+                            entry.rotation = 0;
+                            entry.crop = null;
+                            entry.maxMp = 0;
+                            entry.cropKey = "";
+                        }
+                    }
+                }
+            }
+
+            // --- Live preview widget ------------------------------------
+            let allocHeight;
+            const MIN_PREVIEW_H = 80;
+            const MARGIN = 10;
+
+            function boxHeight(widget, widgetY, fallback) {
+                const nodeH = node.size?.[1];
+                const visible = node.widgets?.filter((w) => !w.hidden);
+                const isLast = !!visible && visible[visible.length - 1] === widget;
+                if (nodeH == null || widgetY == null || !isLast) return fallback;
+                return Math.max(MIN_PREVIEW_H, nodeH - widgetY);
+            }
+
+            const isVueMode = () =>
+                typeof LiteGraph !== "undefined" && !!LiteGraph.vueNodesMode;
+
+            const preview = {
+                name: "composer_preview",
+                type: "noembryo_composer_preview",
+                value: "",
+                serialize: false,
+                options: { serialize: false },
+                computeLayoutSize() {
+                    return { minHeight: MIN_PREVIEW_H, maxHeight: 100000, minWidth: 0 };
+                },
+                draw(ctx, _node, widgetWidth, y, H, lowQuality) {
+                    const h = boxHeight(this, y, allocHeight ?? H) - 8;
+                    const x = MARGIN;
+                    const nodeW = _node?.size?.[0];
+                    const effWidth =
+                        !isVueMode() && nodeW ? Math.min(widgetWidth, nodeW) : widgetWidth;
+                    const w = effWidth - MARGIN * 2;
+                    const slots = validSlots();
+
+                    // Gather sizes for the packing (thumbs may still be loading —
+                    // fall back to 1:1 aspect so the layout is stable).
+                    const sizes = slots.map((i) => {
+                        const t = state.thumbs.get(i);
+                        return t?.img ? [t.img.width, t.img.height] : [64, 64];
+                    });
+                    const gap = Math.max(0, parseInt(gapWidget?.value, 10) || 0);
+                    const plan = slots.length ? icPlanNatural(sizes, gap) : null;
+
+                    state.box = null;
+                    ctx.save();
+                    ctx.fillStyle = "#00000033";
+                    ctx.fillRect(x, y, w, h);
+
+                    if (!slots.length || !plan) {
+                        ctx.fillStyle = "#888";
+                        ctx.font = "12px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText("Connect image inputs", x + w / 2, y + h / 2);
+                        ctx.restore();
+                        return;
+                    }
+
+                    // Fit the plan inside the preview area, letterboxed.
+                    const areaH = h - 4;
+                    const s = Math.min(w / plan.width, areaH / plan.height);
+                    const pw = plan.width * s, ph = plan.height * s;
+                    const px0 = x + (w - pw) / 2, py0 = y + 2 + (areaH - ph) / 2;
+                    state.box = { px0, py0, pw, ph, s, plan, slots };
+
+                    ctx.fillStyle = IC_BACKGROUNDS[bgWidget?.value] || "#000";
+                    ctx.fillRect(px0, py0, pw, ph);
+
+                    slots.forEach((slotIdx, i) => {
+                        const [bx, by, bw, bh] = plan.boxes[i];
+                        const t = state.thumbs.get(slotIdx);
+                        const drawX = px0 + bx * s, drawY = py0 + by * s;
+                        // background for slots whose thumb hasn't loaded
+                        if (!t?.img) {
+                            ctx.fillStyle = "#333";
+                            ctx.fillRect(drawX, drawY, bw * s, bh * s);
+                            ctx.fillStyle = "#888";
+                            ctx.font = "10px sans-serif";
+                            ctx.textAlign = "center";
+                            ctx.textBaseline = "middle";
+                            ctx.fillText(`${slotIdx}`, drawX + (bw * s) / 2,
+                                drawY + (bh * s) / 2);
+                            return;
+                        }
+                        // Fit inside the slot, never enlarge (natural sizing).
+                        const scale = Math.min((bw * s) / t.img.width,
+                                               (bh * s) / t.img.height, 1);
+                        const tw = t.img.width * scale, th = t.img.height * scale;
+                        ctx.drawImage(t.img, drawX, drawY, tw, th);
+                    });
+
+                    // Sheet size pill
+                    ctx.fillStyle = "rgba(0,0,0,0.6)";
+                    ctx.font = "10px sans-serif";
+                    ctx.textAlign = "left";
+                    ctx.textBaseline = "alphabetic";
+                    const label = `${plan.width} x ${plan.height} px`;
+                    const tw = ctx.measureText(label).width;
+                    ctx.fillRect(x + 2, y + h - 16, tw + 8, 14);
+                    ctx.fillStyle = "#ddd";
+                    ctx.fillText(label, x + 6, y + h - 5);
+                    ctx.restore();
+                },
+            };
+
+            Object.defineProperty(preview, "computedHeight", {
+                configurable: true,
+                get() { return undefined; },
+                set(v) { allocHeight = v; },
+            });
+            Object.defineProperty(preview, "width", {
+                configurable: true,
+                get: () => undefined,
+                set: () => {},
+            });
+            node.addCustomWidget(preview);
+
+            // Live refresh when widgets change.
+            for (const w of [gapWidget, bgWidget]) {
+                if (w) {
+                    const prev = w.callback;
+                    w.callback = function () {
+                        const r = prev?.apply(this, arguments);
+                        refreshThumbs();
+                        node.setDirtyCanvas?.(true, true);
+                        return r;
+                    };
+                }
+            }
+
+            // Watch KJ Get nodes: when their value changes, refresh thumbnails.
+            for (const i of connectedSlots()) {
+                const input = node.inputs?.find((inp) => inp.name === `image${i}`);
+                if (!input || input.link == null) continue;
+                const link = app.graph.links[input.link];
+                if (!link) continue;
+                const src = app.graph._nodes_by_id?.[link.origin_id];
+                if (!src) continue;
+                const srcType = src.type || "";
+                if (!srcType.includes("KJ")) continue;
+                for (const w of src.widgets || []) {
+                    const prev = w.callback;
+                    w.callback = function () {
+                        const r = prev?.apply(this, arguments);
+                        refreshThumbs();
+                        node.setDirtyCanvas?.(true, true);
+                        return r;
+                    };
+                }
+            }
+
+            // Watch upstream nodes: crop/path/rotation edits refresh instantly.
+            // The Composer's own onDrawBackground runs on every canvas redraw,
+            // so polling there is cheap (string compares) and always fires —
+            // unlike hooks on the upstream node, which newer ComfyUI versions
+            // may simply never call.
+            const prevBg = node.onDrawBackground;
+            node.onDrawBackground = function () {
+                const r = prevBg?.apply(this, arguments);
+                let changed = false;
+                // Safety net: clean up thumbnail entries for any
+                // inputs that are no longer connected (e.g. bypassed).
+                for (const [key, entry] of state.thumbs) {
+                    const i = Number(key);
+                    const input = node.inputs?.find((inp) => inp.name === `image${i}`);
+                    if (!input || input.link == null) {
+                        state.thumbs.delete(key);
+                        changed = true;
+                    }
+                }
+                for (const i of connectedSlots()) {
+                    const cur = upstreamPath(i);
+                    const entry = state.thumbs.get(i);
+                    if (!cur) {
+                        // Upstream invalid (bypassed, broken trace): clear
+                        // the thumbnail but keep the entry so a reconnect
+                        // can reload it. Only clear if we had a real image
+                        // — avoids wiping during transient null returns.
+                        if (entry && entry.path && entry.img) {
+                            entry.path = "";
+                            entry.img = null;
+                            changed = true;
+                        }
+                        continue;
+                    }
+                    // Upstream cleared (empty path): only clear the thumbnail
+                    // when we previously had a real path — avoids wiping
+                    // during transient states where upstreamPath returns ""
+                    // momentarily (graph rebuilds, node moves, etc.).
+                    if (!cur.path) {
+                        if (entry && entry.path) {
+                            entry.path = "";
+                            entry.img = null;
+                            changed = true;
+                        }
+                        continue;
+                    }
+                    const cropKey = `${cur.crop ? JSON.stringify(cur.crop) : ""}` +
+                        `|${cur.maxMp}`;
+                    if (entry && (entry.path !== cur.path ||
+                                  entry.rotation !== cur.rotation ||
+                                  entry.cropKey !== cropKey)) {
+                        entry.path = cur.path;
+                        entry.rotation = cur.rotation;
+                        entry.crop = cur.crop;
+                        entry.maxMp = cur.maxMp;
+                        entry.cropKey = cropKey;
+                        loadThumb(i, entry);
+                        changed = true;
+                    } else if (!entry) {
+                        const ne = { path: cur.path, rotation: cur.rotation,
+                            crop: cur.crop, maxMp: cur.maxMp, cropKey, img: null };
+                        state.thumbs.set(i, ne);
+                        loadThumb(i, ne);
+                        changed = true;
+                    }
+                }
+                if (changed) node.setDirtyCanvas?.(true, true);
+                return r;
+            };
+
+            setTimeout(() => {
+                syncInputs();
+                refreshThumbs();
+                // Set up KJ node callbacks now that inputs are synced.
+                for (const i of connectedSlots()) {
+                    const input = node.inputs?.find((inp) => inp.name === `image${i}`);
+                    if (!input || input.link == null) continue;
+                    const link = app.graph.links[input.link];
+                    if (!link) continue;
+                    const src = app.graph._nodes_by_id?.[link.origin_id];
+                    if (!src) continue;
+                    const srcType = src.type || "";
+                    if (!srcType.includes("KJ")) continue;
+                    for (const w of src.widgets || []) {
+                        if (w.callback) continue;  // already set up
+                        const prev = w.callback;
+                        w.callback = function () {
+                            const r = prev?.apply(this, arguments);
+                            refreshThumbs();
+                            node.setDirtyCanvas?.(true, true);
+                            return r;
+                        };
+                    }
+                }
+            }, 0);
+
+            const prevOnConfigure = node.onConfigure;
+            node.onConfigure = function () {
+                const r = prevOnConfigure?.apply(this, arguments);
+                setTimeout(() => { syncInputs(); refreshThumbs(); }, 0);
+                return r;
+            };
+
+            return result;
+        };
+    },
+});
 
 app.registerExtension({
     name: "noEmbryo.LoadImageFromPath",

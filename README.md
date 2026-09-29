@@ -17,7 +17,6 @@ You can access them through "Add node > noEmbryo" submenu.
 ---
 ## Json Prompt Loader
 ![Example](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/JsonLoader.png)  
-
 A node that can load a `.json` file with `item:prompt` pairs and outputs the selected item's prompt, while combining it with a custom prompt.  
 It can load `.json` files from any directory, not just the node's directory.  
 For the custom text integration, there is a variable (can be specified by the user), that can be used in the item's prompt text to insert the custom text anywhere in the body of the prompt.  
@@ -103,21 +102,20 @@ Built as a much more enhanced version of [Load Image From Path (Enhanced)](https
 
 ---
 ## Resolution Scale
-![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)
+![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)  
 A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
 
 If there is an input image connected, setting either `width` or `height` to 0 will use the other dimension to scale the image (but always multiple of 4).
 
 ---
 ## Regex Text Chopper
-![RegExChopper](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)
+![RegExChopper](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)  
 A node that "chops" a text using a regular expression and outputs the chopped parts of the text. 
 
 ---
 ## H3 Motion Context Clip Stitcher
 
-![H3MotionContextClipStitcher](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/H3MotionContextClipStitcher.png)
-
+![H3MotionContextClipStitcher](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/H3MotionContextClipStitcher.png)  
 Final assembly for [NikoDemon80's H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context) AV clip archives.
 
 It loads numbered h3_motion_context_av_v1 files (clip_xx.safetensors), decodes one clip at a time to avoid memory peaks, dissolves the overlap between adjacent clips (video + synchronized audio), and concatenates them to a final video and audio stream.
@@ -147,8 +145,8 @@ No quality loss, like when trying to concatenate encoded videos.
 
 ---
 ## H3 Motion Context Clip Purge
-![H3MotionContextClipPurge.png](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/refs/heads/master/stuff/H3MotionContextClipPurge.png)
-Deletes the numbered `h3_motion_context_av_v1` clip archive files at the root of a folder (default: `h3_context`)  
+![H3MotionContextClipPurge.png](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/refs/heads/master/stuff/H3MotionContextClipPurge.png)  
+Deletes the numbered `h3_motion_context_av_v1` clip archive files at the root of a folder (default: `h3_context`).  
 Only files matching the pattern are removed; sub-folders and everything inside them are left untouched.
 
 - **Controls**
@@ -183,7 +181,7 @@ This node can save the current workflow to a `.json` file, every time a generati
 <u>**The PromptTermList nodes are now obsolete, and can mostly be replaced by the [Json Prompt Loader](#json-prompt-loader) node.  
 I won't remove them for compatibility reasons, but I would recommend using the [JsonPromptLoader](#json-prompt-loader) node instead.**</u>
 
-![PromptTermList](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)
+![PromptTermList](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)  
 These are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
 ### Usage

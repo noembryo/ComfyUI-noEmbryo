@@ -1,5 +1,6 @@
 import hashlib
 import io
+import math
 import os
 import json
 import shutil
@@ -12,7 +13,6 @@ from urllib.error import URLError
 from PIL import (Image, ImageOps, ImageSequence, ImageFile, UnidentifiedImageError, )
 import numpy as np
 import torch
-
 import folder_paths
 from aiohttp import web
 from server import PromptServer
@@ -94,9 +94,13 @@ def _pillow(fn, arg):
     return x
 
 
-def _pil_to_image_mask(img: 'Image.Image | Iterable[Image.Image]',
-                       output_image: 'list[torch.Tensor] | None',
-                       output_mask: 'list[torch.Tensor] | None'):
+def _pil_to_image_mask(img, output_image, output_mask):
+    """
+
+    :type img: Image.Image | Iterable[Image.Image]
+    :type output_image: list[torch.Tensor] | None
+    :type output_mask: list[torch.Tensor] | None
+    """
     output_images = []
     output_masks = []
     w, h = None, None
@@ -278,7 +282,7 @@ class LoadImageFromPathEnhanced:
                                        " and height are connected, when set (not 0), and"
                                        " it overrides max_megapixels.", }), }, }
 
-    CATEGORY = "noEmbryo"
+    CATEGORY = "noEmbryo/Image"
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("IMAGE", "MASK", "path")
     FUNCTION = "load_image_enhanced"
@@ -446,6 +450,304 @@ class LoadImageFromPathEnhanced:
             return "Invalid image path: {}".format(image_path)
         if not image_path.is_file():
             return "Path is not a file: {}".format(image_path)
+        return True
+
+
+# ---------------------------------------------------------------------------
+# ImageComposer — compose several IMAGE inputs into one sheet.
+# Natural sizing only: one shared scale factor (never above 1), skyline
+# packing, tightest arrangement. The packing is mirrored in JS
+# (web/js/image_nodes.js) for the live on-node preview.
+# ---------------------------------------------------------------------------
+
+_EPS = 1e-9
+_ALIGN = 16
+_IC_BACKGROUNDS = {"black": 0.0, "grey": 0.5, "white": 1.0}
+_IC_PACK_ASPECT_MIN = 0.45
+_IC_PACK_ASPECT_MAX = 2.2
+_IC_PACK_WIDTH_STEPS = 48
+_IC_MAX_IMAGES = 16
+
+
+def _ic_skyline_pack(sizes, width, gap):
+    """ Place rectangles bottom-left into a strip `width` wide.
+
+    Returns (placements, w0, h0) in source pixels, or None if anything
+    does not fit. Placements are (x, y, w, h), in the order given.
+    Nothing is ever rotated.
+    """
+    sky = [(0.0, width, 0.0)]
+    placed = []
+    for w, h in sizes:
+        iw = w + gap
+        ih = h + gap
+        if iw > width + _EPS:
+            return None
+        best = None
+        for i in range(len(sky)):
+            start = sky[i][0]
+            if start + iw > width + _EPS:
+                continue
+            y = 0.0
+            span = iw
+            j = i
+            while span > _EPS and j < len(sky):
+                if sky[j][2] > y:
+                    y = sky[j][2]
+                span -= sky[j][1]
+                j += 1
+            if span > _EPS:
+                continue  # ran off the right-hand end
+            if best is None or (y, start) < best:
+                best = (y, start)
+        if best is None:
+            return None
+        y, x = best
+        placed.append((x, y, w, h))
+        # Cut the covered span out of the skyline and lay the new top
+        # over it, then merge neighbours at the same height.
+        cut = []
+        end = x + iw
+        for sx, sw, sy in sky:
+            if sx + sw <= x + _EPS or sx >= end - _EPS:
+                cut.append((sx, sw, sy))
+                continue
+            if sx < x:
+                cut.append((sx, x - sx, sy))
+            if sx + sw > end:
+                cut.append((end, sx + sw - end, sy))
+        cut.append((x, iw, y + ih))
+        cut.sort(key=lambda seg_: seg_[0])
+        merged = []
+        for seg in cut:
+            if merged and abs(merged[-1][2] - seg[2]) < _EPS:
+                merged[-1] = (merged[-1][0], merged[-1][1] + seg[1], seg[2])
+            else:
+                merged.append(seg)
+        sky = merged
+
+    w0 = max(p[0] + p[2] for p in placed)
+    h0 = max(p[1] + p[3] for p in placed)
+    return placed, w0, h0
+
+
+def _ic_q(v):
+    """ Quantise a score for comparison — mirrors the JS round-trip.
+    """
+    return int(math.floor(v * 1e9 + 0.5))
+
+
+def _ic_pack_sweep(sizes, gap):
+    """ Best packing over candidate widths and placement orders.
+
+    Returns (placements, w0, h0) in source pixels, or None.
+    """
+    used = sum(w * h for w, h in sizes)
+    lo = max(w for w, h in sizes) + gap
+    hi = sum(w for w, h in sizes) + gap * len(sizes)
+    orders = [
+        list(range(len(sizes))),
+        sorted(range(len(sizes)), key=lambda i: (-sizes[i][1], i)),
+        sorted(range(len(sizes)), key=lambda i: (-sizes[i][0], i)),
+        sorted(range(len(sizes)), key=lambda i: (-sizes[i][0] * sizes[i][1], i)),
+    ]
+    found = None
+    for order in orders:
+        ordered = [sizes[i] for i in order]
+        best = None
+        for step in range(_IC_PACK_WIDTH_STEPS):
+            width = lo + (hi - lo) * step / (_IC_PACK_WIDTH_STEPS - 1)
+            got = _ic_skyline_pack(ordered, width, gap)
+            if got is None:
+                continue
+            placed, w0, h0 = got
+            fill = used / float(w0 * h0)
+            aspect = w0 / h0
+            if not _IC_PACK_ASPECT_MIN <= aspect <= _IC_PACK_ASPECT_MAX:
+                continue
+            # Tightest wins; ties go to the squarer sheet, then wider.
+            key = (-_ic_q(fill), _ic_q(abs(math.log(aspect))), -_ic_q(aspect))
+            if best is None or key < best[0]:
+                best = (key, fill, placed, w0, h0, order)
+        if best is not None and (found is None or best[0] < found[0]):
+            found = best
+    if found is None:
+        return None
+    _, _fill, placed, w0, h0, order = found
+    boxes = [None] * len(sizes)
+    for slot, (x, y, w, h) in zip(order, placed):
+        # noinspection PyTypeChecker
+        boxes[slot] = (x, y, w, h)
+    return boxes, w0, h0
+
+
+def _ic_align_down(v):
+    return max(_ALIGN, int(v // _ALIGN) * _ALIGN)
+
+
+def _ic_align_up(v):
+    return max(_ALIGN, int(math.ceil(v / float(_ALIGN))) * _ALIGN)
+
+
+def _ic_box(x, y, w, h, width, height):
+    """ One integer box: SIZE rounded once, position rounded and clamped. """
+    bw = max(1, min(width, int(math.floor(w + 0.5))))
+    bh = max(1, min(height, int(math.floor(h + 0.5))))
+    x0 = max(0, min(width - bw, int(math.floor(x + 0.5))))
+    y0 = max(0, min(height - bh, int(math.floor(y + 0.5))))
+    return x0, y0, bw, bh
+
+
+def _ic_plan_natural(sizes, budget, gap):
+    """ Plan a natural-sizing sheet.
+
+    `sizes` is [(w, h), ...] in source pixels; `budget` the pixel budget
+    (math.inf for no cap). Returns {"width", "height", "boxes"} with
+    boxes as integer (x, y, w, h) in canvas pixels, or None.
+    A frame of gap/2 is left around the whole sheet, matching the visual
+    weight of the inter-layer gaps.
+    """
+    found = _ic_pack_sweep(sizes, gap)
+    if found is None:
+        return None
+    boxes, w0, h0 = found
+    frame = int(round(gap / 2.0))  # half-gap frame; 0 when gap is 0
+    if budget != math.inf:
+        budget = max(1.0, budget - 4 * frame * frame)
+    s_exact = min(1.0, math.sqrt(budget / float(w0 * h0)))
+    if s_exact >= 1.0 and _ic_align_up(w0) * _ic_align_up(h0) <= budget:
+        width = _ic_align_up(w0)
+        height = _ic_align_up(h0)
+        scale = 1.0
+    else:
+        width = _ic_align_down(s_exact * w0)
+        height = max(_ALIGN, int(math.floor(
+            (h0 * width / float(w0)) / _ALIGN + 0.5)) * _ALIGN)
+        scale = min(width / float(w0), height / float(h0), 1.0)
+    ox = (width - w0 * scale) / 2.0
+    oy = (height - h0 * scale) / 2.0
+    out = []
+    for x, y, w, h in boxes:
+        out.append(_ic_box(ox + x * scale, oy + y * scale, w * scale,
+                           h * scale, width, height))
+    # Expand the canvas by the frame and shift every box inward by it.
+    width += 2 * frame
+    height += 2 * frame
+    out = [(x + frame, y + frame, w, h) for x, y, w, h in out]
+    return {"width": width, "height": height, "boxes": out}
+
+
+class ImageComposer:
+    """ Compose multiple IMAGE inputs into one sheet, natural sizing. """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        optional = {}
+        for i in range(1, _IC_MAX_IMAGES + 1):
+            optional[f"image{i}"] = ("IMAGE", {"tooltip":
+                "Image layer — connect another Load Image node to reveal "
+                "the next input slot."})
+        return {"required": {
+                    "gap": ("INT", {"default": 0, "min": 0, "max": 256, "step": 2,
+                        "tooltip": "Pixels of background between layers."}),
+                    "background": (list(_IC_BACKGROUNDS), {"default": "black",
+                        "tooltip": "Colour behind the layers."}),
+                    "max_megapixels": ("FLOAT", {"default": 0.0,
+                        "min": 0.0, "max": 128.0, "step": 0.01,
+                        "tooltip": "Cap the sheet size (1.0 = 1024x1024 px). "
+                                   "0 = no cap."}),
+                },
+                "optional": optional}
+
+    CATEGORY = "noEmbryo/Image"
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("IMAGE",)
+    FUNCTION = "compose"
+    DESCRIPTION = (
+        " Compose several images into ONE image. Images keep their order "
+        " and relative pixel sizes (natural sizing, never enlarged) and are "
+        " packed as tightly as possible; rows are chosen automatically. "
+        " The preview refreshes instantly when an upstream image, crop, "
+        " rotation or megapixel cap changes — no workflow run needed.")
+
+    # noinspection PyMethodMayBeStatic
+    def compose(self, gap=8, background="black",
+                max_megapixels=0.0, **kwargs):
+        # Collect connected images, in input order.
+        # KJNodes Set/Get nodes pass IMAGE tensors through graph links.
+        # If they arrive as lists (e.g. after JSON round-trip), convert them.
+        tiles = []
+        for i in range(1, _IC_MAX_IMAGES + 1):
+            t = kwargs.get(f"image{i}")
+            if t is not None:
+                if not isinstance(t, torch.Tensor):
+                    # Handle string (JSON-encoded tensor), dict-wrapped, lists
+                    if isinstance(t, str):
+                        try:
+                            t = json.loads(t)
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                    if isinstance(t, dict):
+                        t = t.get("image") or t.get("value") or t.get("data")
+                    # noinspection PyBroadException
+                    try:
+                        t = torch.tensor(t, dtype=torch.float32)
+                    except Exception:
+                        continue
+                tiles.append(t[0] if t.dim() == 4 else t)  # (H, W, C)
+        if not tiles:
+            raise ValueError("ImageComposer: no images connected. Connect at "
+                             "least one image input.")
+
+        gap = max(0, int(gap))
+        try:
+            mp = float(max_megapixels)
+        except (TypeError, ValueError):
+            mp = 0.0
+        budget = max(1.0, mp * 1024.0 * 1024.0) if mp > 0 else math.inf
+
+        sizes = [(int(t.shape[1]), int(t.shape[0])) for t in tiles]
+        plan = _ic_plan_natural(sizes, budget, gap)
+        if plan is None:
+            raise ValueError("ImageComposer: could not find a layout.")
+
+        width, height = plan["width"], plan["height"]
+        fill = _IC_BACKGROUNDS.get(background, 0.0)
+        canvas = torch.full((1, height, width, 3), fill, dtype=torch.float32)
+
+        for idx, (tile, (x, y, w, h)) in enumerate(zip(tiles, plan["boxes"])):
+            th, tw = int(tile.shape[0]), int(tile.shape[1])
+            # Fit the tile inside its slot, centered, never enlarging.
+            scale = min(w / float(tw), h / float(th), 1.0)
+            nw, nh = max(1, min(w, round(tw * scale))), max(1, min(h, round(th * scale)))
+            px = x + (w - nw) // 2
+            py = y + (h - nh) // 2
+            tile = tile.permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+            scaled = torch.nn.functional.interpolate(
+                tile, size=(nh, nw), mode="bilinear",
+                antialias=True).squeeze(0).permute(1, 2, 0)  # (H, W, C)
+            canvas[:, py:py + nh, px:px + nw, :] = scaled.clamp(0.0, 1.0)
+
+        return (canvas,)
+
+    @classmethod
+    def IS_CHANGED(cls, gap=8, background="black",
+                   max_megapixels=0.0, **kwargs):
+        m = hashlib.sha256()
+        m.update(str(gap).encode("utf-8"))
+        m.update(str(background).encode("utf-8"))
+        m.update(str(max_megapixels).encode("utf-8"))
+        for i in range(1, _IC_MAX_IMAGES + 1):
+            t = kwargs.get(f"image{i}")
+            if t is not None:
+                if not isinstance(t, torch.Tensor):
+                    t = torch.tensor(t, dtype=torch.float32)
+                m.update(str(t.shape).encode("utf-8"))
+        return m.digest().hex()
+
+    # noinspection PyUnusedLocal
+    @classmethod
+    def VALIDATE_INPUTS(cls, **_):
         return True
 
 
