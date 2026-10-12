@@ -46,7 +46,7 @@ for i in range(6):  # create TermList1-6 if not exists
             json.dump({"None": ""}, f, indent=4)
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS",
-           "WEB_DIRECTORY", "setup",
+           "WEB_DIRECTORY",
            ]
 
 # Add custom route for JSON loading

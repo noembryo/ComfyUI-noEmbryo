@@ -13,9 +13,59 @@ from urllib.error import URLError
 from PIL import (Image, ImageOps, ImageSequence, ImageFile, UnidentifiedImageError, )
 import numpy as np
 import torch
+import torch.nn.functional as F
 import folder_paths
+import comfy.model_management as model_management
 from aiohttp import web
 from server import PromptServer
+
+
+class ResolutionScale:
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+
+        return {"required": {"width": ("INT", {"default": 512}),
+                             "height": ("INT", {"default": 512}),
+                             "scale_factor": ("FLOAT", {"default": 2.0,
+                                                        "min": 0.1,
+                                                        "max": 8.0,
+                                                        "step": 0.1,
+                                                        "round": 0.1,
+                                                        "display": "number"}),},
+                "optional": {"image": ("IMAGE",), },
+                }
+
+    RETURN_TYPES = ("INT", "INT", "FLOAT", "INT", "INT")
+    RETURN_NAMES = ("Width", "Height", "Scale Factor",
+                    "Original Width", "Original Height")
+
+    FUNCTION = "run"
+    CATEGORY = "noEmbryo/Image"
+
+    # noinspection PyMethodMayBeStatic
+    def run(self, width, height, scale_factor, image=None):
+        if image is not None:
+            _, img_height, img_width, _ = image.shape
+            if width == 0:
+                ratio = img_width / img_height
+                width = height * ratio
+                width = int(width / 4) * 4
+            elif height == 0:
+                ratio = img_height / img_width
+                height = width * ratio
+                height = int(height / 4) * 4
+            else:
+                width = img_width
+                height = img_height
+
+        new_width = int(width * scale_factor)
+        new_height = int(height * scale_factor)
+
+        return new_width, new_height, scale_factor, width, height
 
 
 def _is_url(s) -> bool:
@@ -749,6 +799,369 @@ class ImageComposer:
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
         return True
+
+
+# ---------------------------------------------------------------------------
+# ImageSharpener — GPU-accelerated image sharpening with multiple methods.
+# Ported from ComfyUI-KJNodes (ImageSharpenKJ) for compatibility with
+# comfyui-frontend 1.39.2.
+# ---------------------------------------------------------------------------
+
+
+def _gaussian_kernel_1d(sigma: float, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Create a 1D Gaussian kernel."""
+    radius = max(int(3.0 * sigma + 0.5), 1)
+    x = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    kernel.div_(kernel.sum())
+    return kernel
+
+
+def _gaussian_blur(img: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Separable Gaussian blur on BCHW tensor."""
+    kernel_1d = _gaussian_kernel_1d(sigma, img.device, img.dtype)
+    k = kernel_1d.shape[0]
+    C = img.shape[1]
+    pad = k // 2
+
+    kh = kernel_1d.view(1, 1, 1, k).expand(C, -1, -1, -1)
+    blurred = F.conv2d(F.pad(img, (pad, pad, 0, 0), mode='reflect'), kh, groups=C)
+
+    kv = kernel_1d.view(1, 1, k, 1).expand(C, -1, -1, -1)
+    blurred = F.conv2d(F.pad(blurred, (0, 0, pad, pad), mode='reflect'), kv, groups=C)
+
+    return blurred
+
+
+def _rcas(image: torch.Tensor, strength: float) -> torch.Tensor:
+    """AMD FidelityFX RCAS — 5-tap cross filter with contrast-adaptive lobe."""
+    device = model_management.get_torch_device()
+    intermediate_device = model_management.intermediate_device()
+    dtype = model_management.intermediate_dtype()
+
+    B, H, W, C = image.shape
+    out = torch.empty(B, H, W, C, device=intermediate_device, dtype=dtype)
+    attenuation = strength
+
+    for i in range(B):
+        img = image[i:i+1].to(device=device, dtype=dtype).permute(0, 3, 1, 2)
+        padded = F.pad(img, (1, 1, 1, 1), mode='reflect')
+
+        n = padded[:, :, 0:H, 1:W+1]
+        s = padded[:, :, 2:H+2, 1:W+1]
+        w = padded[:, :, 1:H+1, 0:W]
+        e = padded[:, :, 1:H+1, 2:W+2]
+        center = img
+
+        mn = torch.min(torch.min(torch.min(torch.min(n, s), w), e), center)
+        mx = torch.max(torch.max(torch.max(torch.max(n, s), w), e), center)
+
+        # hitMin = -mn / (4*mx),  hitMax = -(1-mx) / (4*(1-mn))
+        hit_min = mn.div(mx * 4.0 + 1e-6).neg_()
+        hit_max = mx.neg().add_(1.0).div_(mn.neg().add_(1.0).mul_(4.0).add_(1e-6)).neg_()
+
+        torch.max(hit_min, hit_max, out=hit_min)
+        lobe = hit_min.min(dim=1, keepdim=True).values
+
+        lobe.mul_(attenuation)
+        lobe.clamp_(-0.1875, 0.0)
+
+        # (center + lobe*(n+s+e+w)) / (1 + 4*lobe)
+        norm = lobe.mul(4.0).add_(1.0).reciprocal_()
+        neighbors = n + s
+        neighbors.add_(e).add_(w)
+        neighbors.mul_(lobe).add_(center).mul_(norm)
+        neighbors.clamp_(0.0, 1.0)
+
+        out[i:i+1] = neighbors.permute(0, 2, 3, 1).to(device=intermediate_device)
+
+    return out
+
+
+def _adaptive_usm(image: torch.Tensor, strength: float, radius: float, threshold: float) -> torch.Tensor:
+    """Unsharp mask modulated by local variance — sharpens texture, skips flat areas."""
+    device = model_management.get_torch_device()
+    intermediate_device = model_management.intermediate_device()
+    dtype = model_management.intermediate_dtype()
+
+    B, H, W, C = image.shape
+    out = torch.empty(B, H, W, C, device=intermediate_device, dtype=dtype)
+    var_sigma = radius * 1.5
+
+    for i in range(B):
+        img = image[i:i+1].to(device=device, dtype=dtype, copy=True).permute(0, 3, 1, 2)
+
+        blurred = _gaussian_blur(img, radius)
+        detail = img - blurred
+
+        # Local variance: E[x^2] - E[x]^2
+        local_mean = _gaussian_blur(img, var_sigma)
+        local_mean_sq = _gaussian_blur(img.square(), var_sigma)
+        local_mean_sq.sub_(local_mean * local_mean).clamp_(min=0.0)
+
+        # Convert to std deviation so threshold is in pixel-intensity scale
+        modulation = local_mean_sq.mean(dim=1, keepdim=True).sqrt_()
+
+        if threshold > 0:
+            modulation.div_(threshold).clamp_(0.0, 1.0)
+        else:
+            modulation.fill_(1.0)
+
+        img.addcmul_(detail, modulation, value=strength).clamp_(0.0, 1.0)
+
+        out[i:i+1] = img.permute(0, 2, 3, 1).to(device=intermediate_device)
+
+    return out
+
+
+def _high_pass(image: torch.Tensor, strength: float, radius: float) -> torch.Tensor:
+    """High-pass sharpening: original + strength * (original - blur)."""
+    device = model_management.get_torch_device()
+    intermediate_device = model_management.intermediate_device()
+    dtype = model_management.intermediate_dtype()
+
+    B, H, W, C = image.shape
+    out = torch.empty(B, H, W, C, device=intermediate_device, dtype=dtype)
+
+    for i in range(B):
+        img = image[i:i+1].to(device=device, dtype=dtype).permute(0, 3, 1, 2)
+
+        low_pass = _gaussian_blur(img, radius)
+        low_pass.neg_().add_(img).mul_(strength).add_(img).clamp_(0.0, 1.0)
+
+        out[i:i+1] = low_pass.permute(0, 2, 3, 1).to(device=intermediate_device)
+
+    return out
+
+
+def _deconvolution(image: torch.Tensor, strength: float, radius: float, iterations: int) -> torch.Tensor:
+    """Richardson-Lucy deconvolution with Gaussian PSF."""
+    device = model_management.get_torch_device()
+    intermediate_device = model_management.intermediate_device()
+    dtype = model_management.intermediate_dtype()
+
+    B, H, W, C = image.shape
+    out = torch.empty(B, H, W, C, device=intermediate_device, dtype=dtype)
+
+    # Gaussian PSF kernel (symmetric, so PSF^T = PSF)
+    kernel_1d = _gaussian_kernel_1d(radius, device, dtype)
+    k = kernel_1d.shape[0]
+    pad = k // 2
+    kh = kernel_1d.view(1, 1, 1, k).expand(C, -1, -1, -1)
+    kv = kernel_1d.view(1, 1, k, 1).expand(C, -1, -1, -1)
+
+    for i in range(B):
+        img = image[i:i+1].to(device=device, dtype=dtype).permute(0, 3, 1, 2)
+        estimate = img.clone()
+
+        for _ in range(iterations):
+            # estimate *= (observed / (estimate * PSF)) * PSF^T
+            blurred = F.conv2d(F.pad(estimate, (pad, pad, 0, 0), mode='reflect'), kh, groups=C)
+            blurred = F.conv2d(F.pad(blurred, (0, 0, pad, pad), mode='reflect'), kv, groups=C)
+
+            blurred.add_(1e-6)
+            torch.div(img, blurred, out=blurred)
+
+            correction = F.conv2d(F.pad(blurred, (pad, pad, 0, 0), mode='reflect'), kh, groups=C)
+            correction = F.conv2d(F.pad(correction, (0, 0, pad, pad), mode='reflect'), kv, groups=C)
+
+            estimate.mul_(correction)
+
+        torch.lerp(img, estimate, strength, out=estimate)
+        estimate.clamp_(0.0, 1.0)
+
+        out[i:i+1] = estimate.permute(0, 2, 3, 1).to(device=intermediate_device)
+
+    return out
+
+
+class ImageSharpenerFull:
+    """GPU-accelerated image sharpening with multiple methods.
+
+    Methods:
+    - RCAS: AMD's Robust Contrast-Adaptive Sharpening (from FSR). Minimal artifacts.
+    - Adaptive USM: Unsharp mask with local variance modulation.
+    - High-Pass: Extracts high-frequency detail and blends it back.
+    - Deconvolution: Richardson-Lucy iterative deconvolution.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "method": (["rcas", "adaptive_usm", "high_pass", "deconvolution"], {
+                    "default": "rcas",
+                    "tooltip": "Sharpening method to use."
+                }),
+            },
+            "optional": {
+                # RCAS parameters
+                "rcas_strength": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.01,
+                                            "tooltip": "0 = no sharpening, 1 = full RCAS sharpening."}),
+                # Adaptive USM parameters
+                "usm_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 3.0, "step": 0.01,
+                                           "tooltip": "Sharpening multiplier. Values above 1.0 give aggressive sharpening."}),
+                "usm_radius": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 5.0, "step": 0.1,
+                                         "tooltip": "Gaussian blur sigma for the unsharp mask. Larger = enhances coarser detail."}),
+                "usm_threshold": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01,
+                                            "tooltip": "Noise gate. Higher = only sharpen areas with more texture/detail. 0 = sharpen everything."}),
+                # High-Pass parameters
+                "hp_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 3.0, "step": 0.01,
+                                          "tooltip": "Blend factor for high-frequency detail. Values above 1.0 give a punchier effect."}),
+                "hp_radius": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 5.0, "step": 0.1,
+                                        "tooltip": "Gaussian blur sigma defining the frequency cutoff. Larger = enhances coarser detail."}),
+                # Deconvolution parameters
+                "dc_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01,
+                                          "tooltip": "Blend between original (0) and fully deconvolved (1)."}),
+                "dc_radius": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 5.0, "step": 0.1,
+                                        "tooltip": "Sigma of the assumed Gaussian blur to reverse."}),
+                "dc_iterations": ("INT", {"default": 10, "min": 1, "max": 100, "step": 1,
+                                          "tooltip": "Richardson-Lucy iterations. More = sharper but slower, diminishing returns past ~20."}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "sharpen"
+    CATEGORY = "noEmbryo/Image"
+    DESCRIPTION = (
+        "GPU-accelerated image sharpening with multiple methods.\n\n"
+        "**RCAS** — AMD's Robust Contrast-Adaptive Sharpening (from FSR). "
+        "Single 5-tap cross filter that adapts to local contrast. "
+        "Minimal artifacts, good for general use with little tuning.\n\n"
+        "**Adaptive USM** — Unsharp mask with local variance modulation. "
+        "Sharpens detail-rich areas more, flat/noisy areas less. "
+        "More controllable than RCAS via radius and threshold parameters.\n\n"
+        "**High-Pass** — Extracts high-frequency detail and blends it back. "
+        "Gives a \"clarity\" enhancement feel. Uses radius to control detail scale.\n\n"
+        "**Deconvolution** — Richardson-Lucy iterative deconvolution. "
+        "Can recover actual lost detail from blur, not just enhance edges. "
+        "Uses radius as the estimated blur kernel and iterations to control convergence."
+    )
+
+    @staticmethod
+    def sharpen(image, method, rcas_strength=0.8, usm_strength=0.5, usm_radius=1.0,
+                usm_threshold=0.05, hp_strength=0.5, hp_radius=1.0,
+                dc_strength=0.5, dc_radius=1.0, dc_iterations=10):
+        # Handle both IMAGE (BHWC) and MASK (BHW) inputs
+        is_mask = image.ndim == 3  # BHW
+        if is_mask:
+            image = image.unsqueeze(-1)  # BHW -> BHWC with C=1
+
+        # Early return if strength is 0
+        if method == "rcas" and rcas_strength == 0:
+            result = image
+        elif method == "adaptive_usm" and usm_strength == 0:
+            result = image
+        elif method == "high_pass" and hp_strength == 0:
+            result = image
+        elif method == "deconvolution" and dc_strength == 0:
+            result = image
+        else:
+            if method == "rcas":
+                result = _rcas(image, rcas_strength)
+            elif method == "adaptive_usm":
+                result = _adaptive_usm(image, usm_strength, usm_radius, usm_threshold)
+            elif method == "high_pass":
+                result = _high_pass(image, hp_strength, hp_radius)
+            else:  # deconvolution
+                result = _deconvolution(image, dc_strength, dc_radius, dc_iterations)
+
+        if is_mask:
+            result = result.squeeze(-1)  # BHWC -> BHW
+
+        return (result,)
+
+    @classmethod
+    def IS_CHANGED(cls, image, method, rcas_strength=0.8, usm_strength=0.5, usm_radius=1.0,
+                   usm_threshold=0.05, hp_strength=0.5, hp_radius=1.0,
+                   dc_strength=0.5, dc_radius=1.0, dc_iterations=10):
+        import hashlib
+        m = hashlib.sha256()
+        # Hash the image tensor shape and a sample of its data
+        if hasattr(image, 'shape'):
+            m.update(str(image.shape).encode("utf-8"))
+            # Hash a small sample for content detection
+            if image.numel() > 0:
+                flat = image.flatten()
+                step = max(1, flat.numel() // 100)
+                sample = flat[::step].to(torch.float32).cpu().numpy().tobytes()
+                m.update(sample)
+        m.update(method.encode("utf-8"))
+        m.update(str(rcas_strength).encode("utf-8"))
+        m.update(str(usm_strength).encode("utf-8"))
+        m.update(str(usm_radius).encode("utf-8"))
+        m.update(str(usm_threshold).encode("utf-8"))
+        m.update(str(hp_strength).encode("utf-8"))
+        m.update(str(hp_radius).encode("utf-8"))
+        m.update(str(dc_strength).encode("utf-8"))
+        m.update(str(dc_radius).encode("utf-8"))
+        m.update(str(dc_iterations).encode("utf-8"))
+        return m.digest().hex()
+
+
+class ImageSharpener:
+    """GPU-accelerated image sharpening with RCAS:
+    AMD's Robust Contrast-Adaptive Sharpening (from FSR). Minimal artifacts.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+            },
+            "optional": {
+                "rcas_strength": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.01,
+                                            "tooltip": "0 = no sharpening, 1 = full RCAS sharpening."}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "sharpen"
+    CATEGORY = "noEmbryo/Image"
+    DESCRIPTION = (
+        "GPU-accelerated image sharpening with the RCAS method.\n\n"
+        "**RCAS** — AMD's Robust Contrast-Adaptive Sharpening (from FSR). "
+        "Single 5-tap cross filter that adapts to local contrast. "
+        "Minimal artifacts, good for general use with little tuning."
+    )
+
+    @staticmethod
+    def sharpen(image, rcas_strength=0.8):
+        # Handle both IMAGE (BHWC) and MASK (BHW) inputs
+        is_mask = image.ndim == 3  # BHW
+        if is_mask:
+            image = image.unsqueeze(-1)  # BHW -> BHWC with C=1
+
+        # Early return if strength is 0
+        if rcas_strength == 0:
+            result = image
+        else:
+            result = _rcas(image, rcas_strength)
+
+        if is_mask:
+            result = result.squeeze(-1)  # BHWC -> BHW
+
+        return (result,)
+
+    @classmethod
+    def IS_CHANGED(cls, image, rcas_strength=0.8):
+        import hashlib
+        m = hashlib.sha256()
+        # Hash the image tensor shape and a sample of its data
+        if hasattr(image, 'shape'):
+            m.update(str(image.shape).encode("utf-8"))
+            # Hash a small sample for content detection
+            if image.numel() > 0:
+                flat = image.flatten()
+                step = max(1, flat.numel() // 100)
+                sample = flat[::step].to(torch.float32).cpu().numpy().tobytes()
+                m.update(sample)
+        m.update(str(rcas_strength).encode("utf-8"))
+        return m.digest().hex()
 
 
 # Middleware to handle clipspace file resolution

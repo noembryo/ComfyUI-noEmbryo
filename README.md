@@ -7,6 +7,7 @@ You can access them through "Add node > noEmbryo" submenu.
   * [Json Prompt Loader](#json-prompt-loader)
   * [Load Image (from path)](#load-image-from-path)
   * [Image Composer](#image-composer)
+  * [Image Sharpener](#image-sharpener)
   * [Resolution Scale](#resolution-scale)
   * [Regex Text Chopper](#regex-text-chopper)
   * [H3 Motion Context Clip Stitcher](#h3-motion-context-clip-stitcher)
@@ -119,6 +120,14 @@ The preview refreshes instantly when an upstream image, crop, rotation or megapi
 The inputs are automatically increase, every time you connect a new image loader.
 
 ---
+
+## Image Sharpener
+
+GPU-accelerated image sharpening with RCAS, AMD's Robust Contrast-Adaptive Sharpening (from FSR).   
+Single 5-tap cross filter that adapts to local contrast.  
+Minimal artifacts, good for general use with little tuning.
+
+---
 ## Resolution Scale
 ![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)  
 A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
@@ -168,19 +177,21 @@ No quality loss, like when trying to concatenate encoded videos.
 ## H3 Clip Refiner
 
 ![H3ClipRefiner](https://github.com/noembryo/ComfyUI-noEmbryo/blob/master/stuff/H3ClipRefiner.png?raw=true)  
-Inline texture-ratchet correction node for `H3 Motion Context` clips.
-
+Inline style-drift corrector **and** optional refine-resample for `H3 Motion Context` clips.   
 Place this node BETWEEN the sampler (`SamplerCustomAdvanced`) and the `H3 Motion Context Save Latent` node.  
-It operates on the LATENT level (no VAE decode/encode needed for measurement) to fix the "texture ratchet": high-band noise/grain increases monotonically at each join (+4.2% mid-band per join).  
-The statistic is band_ratio = high-band std / total std.  
-Measured across a chain it goes 0.3643 -> 0.3673 -> 0.3702 (monotone increase).
+It works on the LATENT level and attacks the accumulated degradation with **two halves**:
+
+- **Statistical (always on).** A per-channel affine (matches mean + std) plus a high-band gain match. This fixes the *drift*(luminance, contrast, color/saturation and the "texture ratchet") but, being pure arithmetic, it **cannot put back the micro-detail the chain has lost**.
+- **Generative (optional).** Connect `model` + `positive`/`negative`, and the node runs a short low-denoise **refine resample**, then transfers **only its high band (detail)** onto the original low band (structure).  
+  Keeping the original low band is what stops the **background shift / dissolve** that a whole-latent blend suffers from; the refine becomes a *detail donor*, not a replacement.
 
 
 
 - **Inputs**
   - **latent**  gets the generated AV latent from your H3 sampler (SamplerCustomAdvanced output).
-  - **reference_latent** is optional. It gets the reference latent (e.g., first clip) to measure target_ratio from it automatically.  
-    If connected, target_ratio is ignored and measured from this latent.
+  - **reference_latent** is optional. It gets the reference latent (e.g., first clip) to measure the target statistics from it automatically.
+    If connected, all target statistics are measured from this latent and the input latent is corrected to match it.
+  - **model** + **positive** / **negative** are optional. Connect them (same prompt you sampled with), to enable the refine resample that regenerates lost detail. Leave `model` disconnected for the pure statistical corrector.
 
 - **Outputs**
   - **latent** is the refined latent.
@@ -189,24 +200,28 @@ Measured across a chain it goes 0.3643 -> 0.3673 -> 0.3702 (monotone increase).
 
 
 - **Controls**
-  - **target_ratio** is the ratio to rescale the high-band so the band_ratio matches the target clip (first)
-  - **strength** is how much change it finally produces.
-    - 0 = None
-    - 1.0 = Full
-    -  > 1.0 = Overshoot
+  - **strength** is how much the *statistical* correction is applied.
+    - 0 = None (measure only, pass through)
+    - 1.0 = Full match to the reference statistics
+    - \> 1.0 = Overshoot (pushes past the reference). Safe to use (e.g. 1.5 or 2.0) when the drift keeps accumulating: the correction only touches the body and the overlap frames stay raw, so overshoot cannot reintroduce a seam flash.
+  - **context_length** is the number of frames at the head/tail that are the Motion Context overlap regions.
+    These frames are left completely raw to preserve crossfade consistency; the correction ramps in just inside the body.
+    Must match the `context_length` in the H3 Motion Context node and the Clip Stitcher.
+    5, 22, 39 or 56 are the lengths that are a whole number of latent steps.
+  - **refine_denoise** (default 0.4) — denoise for the refine resample. ~0.3–0.5 restores detail while keeping the structure; higher changes content more.
+  - **refine_steps** (default 3) — sampler steps for the refine. 2–4 is plenty.
+  - **refine_cfg** (default 1.0) — CFG for the refine; match your main sampler.
+  - **sampler_name** / **scheduler** / **seed** — the refine's sampler, scheduler and noise seed.
+  - **detail_strength** (default 1.0) — how much of the refined high band (detail) to transfer over the original. 0 = statistical only, 1 = full refined detail. The low band is always kept from the original, so the background never shifts.
 
 1. **Usage**:
-   1. First run: set target_ratio=0.0 (measure mode).  
-      The node measures the band_ratio (high-band std / total std) of the video latent and logs it (e.g., "band_ratio=0.3673").  
-      The latent passes through unchanged.
-   2. Note the reported band_ratio from the FIRST clip (e.g., 0.3643).
-   3. Subsequent runs: set target_ratio to the first clip's band_ratio (e.g., 0.3643).  
-      The node applies match_band to rescale the high-band so the band_ratio matches the target, fixing the texture ratchet.
-
-
-*TO MAKE IT LESS GRAINY*:  
-If a clip measures at 0.3917, and you want it less grainy, set target_ratio to a LOWER value (e.g., 0.3800).  
-The lower the target_ratio, the more the high-band grain is reduced.
+   1. Run the FIRST clip through with `reference_latent` unconnected.
+      The node measures and reports its statistics but passes the latent through unchanged.
+   2. Feed that first clip's latent into `reference_latent` for all subsequent clips.
+      The node matches every later clip's body to the first clip's body.
+   3. Set `context_length` to match your H3 Motion Context setting (default 22).
+   4. (Optional) connect `model` + `positive`/`negative` to also regenerate lost detail; tune `refine_denoise` (~0.3–0.5) and `detail_strength`.
+   5. Adjust `strength` if needed: 1.0 = full match, >1.0 = stronger.
 
 ---
 ## H3 Motion Context Clip Purge
