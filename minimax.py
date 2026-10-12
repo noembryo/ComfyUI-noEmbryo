@@ -719,15 +719,13 @@ def _refine_resample(av_latent, model, positive, negative, denoise, steps, cfg,
     :return: torch.Tensor [B,C,T,H,W] on CPU (video only)|None
     """
     device = model.load_device
-
-    # Make a deep copy of the AV latent to avoid any in-place modifications
-    # during the refine resample that could affect the original audio.
+    # Move AV latent to device - handle NestedTensor or tuple
     if hasattr(av_latent, "to"):
         work = av_latent.to(device)
     elif isinstance(av_latent, (tuple, list)):
-        work = tuple(p.to(device).clone() for p in av_latent)
+        work = tuple(p.to(device) for p in av_latent)
     else:
-        work = av_latent.to(device).clone()
+        work = av_latent.to(device)
 
     # Progress bar for refine resample steps
     pbar = ProgressBar(int(steps), node_id=node_id)
@@ -736,17 +734,12 @@ def _refine_resample(av_latent, model, positive, negative, denoise, steps, cfg,
     def _pbar_callback(step, x0, x, total_steps):
         pbar.update_absolute(step + 1, total_steps)
 
-    # Save model training mode and force eval to prevent batch norm updates
-    # that would accumulate across clips and distort audio.
-    was_training = model.training
-    model.eval()
     try:
-        with torch.no_grad():
-            noise = comfy.sample.prepare_noise(work, int(seed))
-            samples = comfy.sample.sample(model, noise, int(steps), float(cfg),
-                                          str(sampler_name), str(scheduler), positive,
-                                          negative, work, denoise=float(denoise),
-                                          seed=int(seed), callback=_pbar_callback)
+        noise = comfy.sample.prepare_noise(work, int(seed))
+        samples = comfy.sample.sample(model, noise, int(steps), float(cfg),
+                                      str(sampler_name), str(scheduler),
+                                      positive, negative, work, denoise=float(denoise),
+                                      seed=int(seed), callback=_pbar_callback)
         # samples is AV latent (NestedTensor/tuple); extract video part
         if hasattr(samples, "unbind"):
             video = list(samples.unbind())[0]
@@ -756,8 +749,6 @@ def _refine_resample(av_latent, model, positive, negative, denoise, steps, cfg,
             video = samples
         return video.detach().to("cpu", copy=True).contiguous()
     finally:
-        # Restore model training mode
-        model.train(was_training)
         del work
         comfy.model_management.soft_empty_cache()
 
@@ -1139,8 +1130,8 @@ class H3ClipRefiner:
             #     Only when there is no refine supplying real detail. Match the
             #     ABSOLUTE high-band std, measured and applied on the same
             #     affine-corrected body so the two stay consistent.
-            if ((refined_body is None) and (current_hi_sd is not None)
-                    and (target_hi_sd is not None)):
+            if refined_body is None and current_hi_sd is not None \
+                    and target_hi_sd is not None:
                 if abs(target_hi_sd - current_hi_sd) > 1e-6:
                     corr_body_flat = corrected_body.reshape(c * body.shape[1], h, w)
                     corr_split = _band_split(corr_body_flat, sigma=2.0)
