@@ -4,63 +4,35 @@
 A diverse set of nodes for ComfyUI.  
 You can access them through "Add node > noEmbryo" submenu.  
 
-  * [Json Prompt Loader](#json-prompt-loader)
-  * [Load Image (from path)](#load-image-from-path)
-  * [Image Composer](#image-composer)
-  * [Image Sharpener](#image-sharpener)
-  * [Resolution Scale](#resolution-scale)
-  * [Regex Text Chopper](#regex-text-chopper)
-  * [H3 Motion Context Clip Stitcher](#h3-motion-context-clip-stitcher)
-  * [H3 Clip Refiner](#h3-clip-refiner)
-  * [H3 Motion Context Clip Purge](#h3-motion-context-clip-purge)
-  * [H3 AV Latent from Video](#h3-av-latent-from-video)
-  * [H3 Context Latent Converter](#h3-context-latent-converter)
-  * [Auto Save Workflow](#auto-save-workflow)
-  * [PromptTermList 1-6](#prompttermlist-1-6)
-  * [Installation](#installation)
+* [Image nodes](#image-nodes)
+    * [Load Image (from path)](#load-image-from-path)
+    * [Interactive crop](#interactive-crop)
+    * [Image Composer](#image-composer)
+    * [Image Sharpener](#image-sharpener)
+    * [Resolution Scale](#resolution-scale)
+* [MiniMax H3](#minimax-h3)
+    * [H3 Motion Context Clip Stitcher](#h3-motion-context-clip-stitcher)
+    * [H3 Clip Refiner](#h3-clip-refiner)
+    * [H3 Motion Context Clip Purge](#h3-motion-context-clip-purge)
+    * [H3 AV Latent from Video](#h3-av-latent-from-video)
+    * [H3 Context Latent Converter](#h3-context-latent-converter)
+* [Utilities](#utilities)
+    * [Regex Text Chopper](#regex-text-chopper)
+    * [Auto Save Workflow](#auto-save-workflow)
+    * [String to Combo](#string-to-combo)
+    * [String to INT](#string-to-int)
+* [Prompts](#prompts)
+    * [Json Prompt Loader](#json-prompt-loader)
+    * [PromptTermList 1-6](#prompttermlist-1-6)
+* [Installation](#installation)
+
 
 ---
-## Json Prompt Loader
-![Example](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/JsonLoader.png)  
-A node that can load a `.json` file with `item:prompt` pairs and outputs the selected item's prompt, while combining it with a custom prompt.  
-It can load `.json` files from any directory, not just the node's directory.  
-For the custom text integration, there is a variable (can be specified by the user), that can be used in the item's prompt text to insert the custom text anywhere in the body of the prompt.  
-
-- **UI controls**
-  
-  - **json_path** is the path to the `.json` file.  
-      It can be an absolute path of your hard drive, or a relative path to the ComfyUI's installation directory.
-  - **selected_item** selects one of the `.json` file's items (prompts).
-  - **variable** is the variable that will be used to insert the custom text into the item's prompt text.
-  - **custom_text** is the custom text that will be inserted into the item's prompt text.
-- **Advanced Usage**  
-  ![Example](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/JsonLoader2.png) 
-  
-  - **Adding new items**  
-    To add a new item, we have to write it in the `custom_text` input, using the following format:  
-    ```
-    item=The prompt's title/keyword
-    value=The prompt's text, including our variable
-    ```
-  - **Updating items**  
-    To update an item, we use the same method, just write the specific item we want to update.
-    ```
-    item=An existing title/keyword
-    value=The new prompt's text, including our variable
-    ```
-  - **Deleting items**  
-    To delete an item, we use the same format, but we just leave the `value` empty.
-    ```
-    item=An existing title/keyword
-    value=
-    ```
-    All of these methods will update the `.json` file, and the node will output a message about the success or failure of the operation.  
-    We can also load an empty `.json`file and use this method to populate it.  
-
-<u>_**After changing the `.json` file, we must reload the ComfyUI page, so the node can reload the updated file.**_</u>
+# Image nodes
 
 ---
-## Load Image (from path)
+
+### Load Image (from path)
 ![LoadImageFromPath](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
 Load an image from **any path on your computer or a URL**. Paste an absolute path or a link to an image, use an annotated path (`input/file.png`), or click the **Browse** dialog to pick a file from your drives.  
 The file is read from its **original location**; it is **not** copied into ComfyUI’s `input` folder.  
@@ -109,7 +81,7 @@ Built as a much more enhanced version of [Load Image From Path (Enhanced)](https
 
 ---
 
-## Image Composer
+### Image Composer
 
 ![ImageComposer](https://github.com/noembryo/ComfyUI-noEmbryo/blob/master/stuff/ImageComposer.png?raw=true)  
 
@@ -121,26 +93,25 @@ The inputs are automatically increase, every time you connect a new image loader
 
 ---
 
-## Image Sharpener
+### Image Sharpener
 
 GPU-accelerated image sharpening with RCAS, AMD's Robust Contrast-Adaptive Sharpening (from FSR).   
 Single 5-tap cross filter that adapts to local contrast.  
 Minimal artifacts, good for general use with little tuning.
 
 ---
-## Resolution Scale
+### Resolution Scale
 ![ResolutionScale](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/res_scale1.png)  
 A simple node that outputs the resolution of an image using the dimensions of an input image or some custom user-defined dimensions, using a Scale Factor.  
 
 If there is an input image connected, setting either `width` or `height` to 0 will use the other dimension to scale the image (but always multiple of 4).
 
 ---
-## Regex Text Chopper
-![RegExChopper](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)  
-A node that "chops" a text using a regular expression and outputs the chopped parts of the text. 
+# MiniMax H3
 
 ---
-## H3 Motion Context Clip Stitcher
+
+### H3 Motion Context Clip Stitcher
 
 ![H3MotionContextClipStitcher](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/H3MotionContextClipStitcher.png)  
 Final assembly for [NikoDemon80's H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context) AV clip archives.
@@ -174,7 +145,7 @@ No quality loss, like when trying to concatenate encoded videos.
 
 ---
 
-## H3 Clip Refiner
+### H3 Clip Refiner
 
 ![H3ClipRefiner](https://github.com/noembryo/ComfyUI-noEmbryo/blob/master/stuff/H3ClipRefiner.png?raw=true)  
 Inline style-drift corrector **and** optional refine-resample for `H3 Motion Context` clips.   
@@ -224,7 +195,7 @@ It works on the LATENT level and attacks the accumulated degradation with **two 
    5. Adjust `strength` if needed: 1.0 = full match, >1.0 = stronger.
 
 ---
-## H3 Motion Context Clip Purge
+### H3 Motion Context Clip Purge
 ![H3MotionContextClipPurge.png](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/refs/heads/master/stuff/H3MotionContextClipPurge.png)  
 Deletes the numbered `h3_motion_context_av_v1` clip archive files at the root of a folder (default: `h3_context`).  
 Only files matching the pattern are removed; sub-folders and everything inside them are left untouched.
@@ -241,7 +212,7 @@ Only files matching the pattern are removed; sub-folders and everything inside t
 
 ---
 
-## H3 AV Latent from Video
+### H3 AV Latent from Video
 
 ![H3AVLatentFromVideo](https://github.com/noembryo/ComfyUI-noEmbryo/blob/master/stuff/H3AVLatentFromVideo.png?raw=true)   
 Encodes a whole video (IMAGE frames + AUDIO) with the MiniMax H3 VAEs into an AV latent that can be saved with `H3 Motion Context Save Latent` and stitched into later generations.
@@ -270,13 +241,23 @@ Encodes a whole video (IMAGE frames + AUDIO) with the MiniMax H3 VAEs into an AV
 
 ---
 
-## H3 Context Latent Converter
+### H3 Context Latent Converter
 
 A utility node that converts an `H3 Motion Context` archive latent (as loaded by `MiniMaxH3MotionContextLoadLatent`, whose 'samples' is a plain list) into the AV latent form that comfy-core's `LTXVSeparateAVLatent` expects (av_latent["samples"].unbind() -> (video, audio)).
 
+---
+
+# Utilities
 
 ---
-## Auto Save Workflow
+
+### Regex Text Chopper
+
+![RegExChopper](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/regex_text.png)  
+A node that "chops" a text using a regular expression and outputs the chopped parts of the text. 
+
+---
+### Auto Save Workflow
 ![AutoSaveWorkflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/auto_save_workflow.png)  
 This node can save the current workflow to a `.json` file, every time a generation job is run.
 - **UI controls**
@@ -290,7 +271,66 @@ This node can save the current workflow to a `.json` file, every time a generati
   - **✳️trigger** is a dummy output that's used to trigger the saving process, even if nothing is connected to the node.
 
 ---
-## PromptTermList 1-6
+
+### String to Combo
+
+A simple node to convert a (comma-separated or not) string to combo selection (first item).  
+Useful for converting the output of a `Custom Combo` (string) to actual combo value.
+
+---
+
+### String to INT
+
+Another simple conversion of number in text format to an int.
+
+---
+
+# Prompts
+
+---
+
+### Json Prompt Loader
+
+![Example](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/JsonLoader.png)  
+A node that can load a `.json` file with `item:prompt` pairs and outputs the selected item's prompt, while combining it with a custom prompt.  
+It can load `.json` files from any directory, not just the node's directory.  
+For the custom text integration, there is a variable (can be specified by the user), that can be used in the item's prompt text to insert the custom text anywhere in the body of the prompt.  
+
+- **UI controls**
+  
+  - **json_path** is the path to the `.json` file.  
+      It can be an absolute path of your hard drive, or a relative path to the ComfyUI's installation directory.
+  - **selected_item** selects one of the `.json` file's items (prompts).
+  - **variable** is the variable that will be used to insert the custom text into the item's prompt text.
+  - **custom_text** is the custom text that will be inserted into the item's prompt text.
+- **Advanced Usage**  
+  ![Example](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/JsonLoader2.png) 
+  
+  - **Adding new items**  
+    To add a new item, we have to write it in the `custom_text` input, using the following format:  
+    ```
+    item=The prompt's title/keyword
+    value=The prompt's text, including our variable
+    ```
+  - **Updating items**  
+    To update an item, we use the same method, just write the specific item we want to update.
+    ```
+    item=An existing title/keyword
+    value=The new prompt's text, including our variable
+    ```
+  - **Deleting items**  
+    To delete an item, we use the same format, but we just leave the `value` empty.
+    ```
+    item=An existing title/keyword
+    value=
+    ```
+    All of these methods will update the `.json` file, and the node will output a message about the success or failure of the operation.  
+    We can also load an empty `.json`file and use this method to populate it.  
+
+<u>_**After changing the `.json` file, we must reload the ComfyUI page, so the node can reload the updated file.**_</u>
+
+---
+### PromptTermList 1-6
 
 <u>**The PromptTermList nodes are now obsolete, and can mostly be replaced by the [Json Prompt Loader](#json-prompt-loader) node.  
 I won't remove them for compatibility reasons, but I would recommend using the [JsonPromptLoader](#json-prompt-loader) node instead.**</u>
@@ -298,7 +338,7 @@ I won't remove them for compatibility reasons, but I would recommend using the [
 ![PromptTermList](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/Screen2.png)  
 These are some nodes that help with the creation of Prompts inside [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
-### Usage
+**Usage**
 
 Every one of these 6 nodes have a different `json` file that stores its Prompt Terms in "label"/"value" pairs.  
 The "label" part is what we see at the node's dropdown menu, and the "value" part is what it produces at its `Term` output when we run a generation job.  
@@ -330,7 +370,7 @@ value=
 ```
 
 ---
-## Installation
+# Installation
 * Use the ComfyUI Manager
 * Or manually
   * cd to `ComfyUI\custom_nodes`
