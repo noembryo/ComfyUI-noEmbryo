@@ -30,8 +30,6 @@ You can access them through "Add node > noEmbryo" submenu.
 ---
 # Image nodes
 
----
-
 ### Load Image (from path)
 ![LoadImageFromPath](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/LoadImageFromPath.jpg)  
 Load an image from **any path on your computer or a URL**. Paste an absolute path or a link to an image, use an annotated path (`input/file.png`), or click the **Browse** dialog to pick a file from your drives.  
@@ -109,7 +107,6 @@ If there is an input image connected, setting either `width` or `height` to 0 wi
 ---
 # MiniMax H3
 
----
 
 ### H3 Motion Context Clip Stitcher
 
@@ -249,7 +246,6 @@ A utility node that converts an `H3 Motion Context` archive latent (as loaded by
 
 # Utilities
 
----
 
 ### Regex Text Chopper
 
@@ -287,7 +283,6 @@ Another simple conversion of number in text format to an int.
 
 # Prompts
 
----
 
 ### Json Prompt Loader
 
