@@ -66,15 +66,6 @@ try:
 except ImportError:
     pass  # Server not available
 
-# def setup():
-#     @PromptServer.instance.routes.get('/noembryo/get_json')
-#     async def get_json(request):
-#         path = request.query.get('path', '')
-#         if path:
-#             try:
-#                 with open(path, 'r', encoding='utf-8') as f:
-#                     data = json.load(f)
-#                     return web.json_response(data)
-#             except Exception as e:
-#                 return web.json_response({"error": str(e)})
-#         return web.json_response({})
+# Import save/load menu extension API routes
+# (routes are registered at module load time via decorators)
+from .save_load_menu import *  # noqa: F401

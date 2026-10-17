@@ -7,20 +7,20 @@ import folder_paths
 import torch
 
 from .image_nodes import (LoadImageFromPathEnhanced, ImageComposer, ImageSharpener,
-                          ResolutionScale)
+                          ResolutionScale, ImageFromString)
 from .minimax import (H3MotionContextClipStitcher, H3ClipRefiner,
                       H3ContextLatentConverter,
                       H3MotionContextClipPurge, H3AVLatentFromVideo)
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (1, 9, 0),
+            "version": (1, 9, 5),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.9.0"
+__version__ = "1.9.5"
 
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 
@@ -444,6 +444,7 @@ any_type = AnyType("*")
 # copied from https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes/wiki/Conversion-Nodes#cr-string-to-combo
 class StringToCombo:
     """ Convert comma-separated string to combo selection (first item)
+    Useful for converting the output of a `Custom Combo` (string) to actual combo value
     """
 
     @classmethod
@@ -462,7 +463,9 @@ class StringToCombo:
     RETURN_NAMES = ("any",)
     FUNCTION = "convert"
     CATEGORY = "noEmbryo/Utils"
-    DESCRIPTION = "Convert comma-separated string to combo selection (first item)."
+    DESCRIPTION = ("Convert comma-separated string to combo selection (first item).\n"
+                   "Useful for converting the output of a `Custom Combo` (string) "
+                   "to actual combo value.")
 
     @staticmethod
     def convert(string: str) -> Tuple[Any]:
@@ -502,16 +505,48 @@ class StringToInt:
             return (default,)
 
 
+class EmbellishmentNode:
+    """ Embellishment Node - Combines a Divider and a Spacer functionality.
+    When height_px is 0, acts as visual divider line.
+    When height_px > 0, acts as vertical spacing.
+    Inputs:
+      - color: STRING widget, divider color in hex (e.g. "#ffffff")
+      - height_px: INT widget, height in pixels (0 = Divider, >0 = Spacer)
+      - decorator: UI_SUB_DIVIDER (the single connection, exposed to subgraph outer node)
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {}, "optional": {"decorator": ("UI_SUB_DIVIDER", {
+                "tooltip": "Single connection — acts as divider when height_px=0, "
+                           "as spacer when height_px>0"}), }}
+
+    RETURN_TYPES = ()
+    FUNCTION = "out"
+    CATEGORY = "noEmbryo/Utils"
+    OUTPUT_NODE = True
+    DESCRIPTION = ("Embellishment Node - Combines a Divider and a Spacer functionality.\n"
+                   " When height_px is 0, acts as Divider.\n"
+                   " When height_px > 0, acts as Spacer.")
+
+    # noinspection PyMethodMayBeStatic
+    def out(self, decorator=None):
+        return ()
+
+
 NODE_CLASS_MAPPINGS = {
     f"JsonPromptLoader -{__author__}": JsonPromptLoader,
     f"Resolution Scale -{__author__}": ResolutionScale,
     f"Regex Text Chopper -{__author__}": RegExTextChopper,
     f"StringToCombo -{__author__}": StringToCombo,
     f"StringToInt -{__author__}": StringToInt,
+    f"Embellishment -{__author__}": EmbellishmentNode,
     f"Auto Save Workflow -{__author__}": AutoSaveWorkflow,
     f"Load Image (from path) -{__author__}": LoadImageFromPathEnhanced,
     f"Image Composer -{__author__}": ImageComposer,
     f"Image Sharpener -{__author__}": ImageSharpener,
+    f"Image From String -{__author__}": ImageFromString,
     f"H3MotionContextClipStitcher -{__author__}": H3MotionContextClipStitcher,
     f"H3ClipRefiner -{__author__}": H3ClipRefiner,
     f"H3MotionContextClipPurge -{__author__}": H3MotionContextClipPurge,
@@ -532,10 +567,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     f"Regex Text Chopper -{__author__}": f"Regex Text Chopper /{__author__}",
     f"StringToCombo -{__author__}": f"String to Combo /{__author__}",
     f"StringToInt -{__author__}": f"String to Int /{__author__}",
+    f"Embellishment -{__author__}": f"Embellishment /{__author__}",
     f"Auto Save Workflow -{__author__}": f"Auto Save Workflow /{__author__}",
     f"Load Image (from path) -{__author__}": f"Load Image (from path) /{__author__}",
     f"Image Composer -{__author__}": f"Image Composer /{__author__}",
     f"Image Sharpener -{__author__}": f"Image Sharpener /{__author__}",
+    f"Image From String -{__author__}": f"Image From String /{__author__}",
     f"H3MotionContextClipStitcher -{__author__}": f"H3 Motion Context Clip Stitcher /{__author__}",
     f"H3ClipRefiner -{__author__}": f"H3 Clip Refiner /{__author__}",
     f"H3MotionContextClipPurge -{__author__}": f"H3 Motion Context Clip Purge /{__author__}",

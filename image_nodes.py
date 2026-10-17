@@ -10,7 +10,8 @@ from typing import Iterable
 from urllib.request import urlopen, Request, build_opener, HTTPSHandler
 from urllib.error import URLError
 
-from PIL import (Image, ImageOps, ImageSequence, ImageFile, UnidentifiedImageError, )
+from PIL import (Image, ImageOps, ImageSequence, ImageFile, UnidentifiedImageError,
+                 ImageFont, ImageDraw, )
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -1164,6 +1165,208 @@ class ImageSharpener:
         return m.digest().hex()
 
 
+class ImageFromString:
+    """Create an image from a text string.
+
+    Renders multiline text onto a transparent-background RGBA image whose
+    canvas size matches the text extent. Supports font selection, font size,
+    font color (hex) and an optional outline drawn in the inverted font color.
+    """
+
+    _FONT_PATH_MAP = {}
+
+    @classmethod
+    def _system_fonts(cls):
+        """ Return a sorted list of font display names found on the system,
+        populating cls._FONT_PATH_MAP (name -> full path).
+        """
+        if cls._FONT_PATH_MAP:
+            return sorted(cls._FONT_PATH_MAP.keys())
+
+        font_dirs = []
+        if os.name == "nt":
+            font_dirs.append(r"C:\Windows\Fonts")
+        else:
+            font_dirs.extend(["/usr/share/fonts",
+                              "/usr/local/share/fonts", os.path.expanduser("~/.fonts"),])
+
+        for d in font_dirs:
+            if not os.path.isdir(d):
+                continue
+            for f in os.listdir(d):
+                if f.lower().endswith((".ttf", ".ttc", ".otf")):
+                    name = os.path.splitext(f)[0]
+                    cls._FONT_PATH_MAP.setdefault(name, os.path.join(d, f))
+
+        if not cls._FONT_PATH_MAP:
+            cls._FONT_PATH_MAP["default"] = ""
+        return sorted(cls._FONT_PATH_MAP.keys())
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        fonts = cls._system_fonts()
+        default_font = fonts[0] if fonts else "default"
+        return {
+            "required": {
+                "text": ("STRING", {
+                    "multiline": True,
+                    "default": "Hello World",
+                    "tooltip": "Text to render into an image.",
+                }),
+                "font_name": (fonts, {
+                    "default": default_font,
+                    "tooltip": "Font to use for rendering.",
+                }),
+                "font_size": ("INT", {
+                    "default": 32,
+                    "min": 1,
+                    "max": 1024,
+                    "step": 1,
+                    "tooltip": "Font size in pixels.",
+                }),
+                "font_color": ("STRING", {
+                    "default": "#FFFFFF",
+                    "tooltip": "Font color as a hex value (e.g. #FFFFFF or #FFF).",
+                }),
+                "outline_size": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 128,
+                    "step": 1,
+                    "tooltip": "Outline thickness in pixels (0 = no outline).\n"
+                               "Outline color is the inverted font color.",
+                }),
+                "alignment": (["left", "center", "right"], {
+                    "default": "left",
+                    "tooltip": "Horizontal text alignment.",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("image", "mask")
+    FUNCTION = "run"
+    CATEGORY = "noEmbryo/Image"
+    DESCRIPTION = ("Render text into an image with a transparent background.\n"
+                   "The canvas size is determined by the text extent.\n"
+                   "Outline (if > 0) is drawn in the inverted font color.\n"
+                   "Supports horizontal alignment: left, center, right.")
+
+    @staticmethod
+    def _parse_hex(color_str):
+        """ Parse a hex color string into an (R, G, B) tuple.
+        """
+        s = color_str.strip().lstrip("#")
+        if len(s) == 3:
+            s = "".join(c * 2 for c in s)
+        if len(s) != 6:
+            return 255, 255, 255
+        try:
+            return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return 255, 255, 255
+
+    # noinspection PyBroadException
+    @staticmethod
+    def _load_font(font_name, font_size):
+        path = ImageFromString._FONT_PATH_MAP.get(font_name, "")
+        if path and os.path.isfile(path):
+            try:
+                return ImageFont.truetype(path, font_size)
+            except Exception:
+                pass
+        try:  # Fallback to PIL's built-in default font
+            return ImageFont.load_default()
+        except Exception:
+            return ImageFont.load_default()
+
+    def run(self, text, font_name, font_size, font_color, outline_size, alignment):
+        if not text or not text.strip():
+            text = " "
+
+        font = self._load_font(font_name, font_size)
+        color = self._parse_hex(font_color)
+        inv_color = tuple(255 - c for c in color)
+
+        # Split into lines and measure each line individually (for alignment)
+        lines = text.split("\n")
+        dummy = Image.new("RGBA", (1, 1))
+        draw = ImageDraw.Draw(dummy)
+
+        line_bboxes = []
+        for line in lines:
+            try:
+                bbox = draw.textbbox((0, 0), line, font=font, stroke_width=outline_size)
+            except TypeError:
+                bbox = draw.textbbox((0, 0), line, font=font)
+            line_bboxes.append(bbox)
+
+        # Canvas dimensions: width from the widest line, height from all lines
+        pad = max(outline_size, 1) + 2
+        max_line_w = max((b[2] - b[0] for b in line_bboxes), default=0)
+
+        # noinspection PyBroadException
+        try:  # Line spacing from font metrics (ascent + descent)
+            ascent, descent = font.getmetrics()
+            line_step = max(ascent + descent, 1)
+        except Exception:
+            line_step = font_size
+
+        total_h = sum(b[3] - b[1] for b in line_bboxes) + line_step * (len(lines) - 1)
+
+        canvas_w = max(1, int(max_line_w) + 2 * pad)
+        canvas_h = max(1, int(total_h) + 2 * pad)
+
+        image = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+
+        # Draw each line with the requested horizontal alignment
+        y = pad
+        for line, bbox in zip(lines, line_bboxes):
+            line_w = bbox[2] - bbox[0]
+
+            if alignment == "center":
+                x = pad + (max_line_w - line_w) / 2
+            elif alignment == "right":
+                x = pad + (max_line_w - line_w)
+            else:  # left
+                x = pad
+
+            # Position so the line's top aligns with the current y cursor
+            draw_y = y - bbox[1]
+
+            try:
+                draw.text(
+                    (x, draw_y), line, font=font,
+                    fill=color + (255,),
+                    stroke_width=outline_size,
+                    stroke_fill=inv_color + (255,),
+                )
+            except TypeError:
+                draw.text((x, draw_y), line, font=font, fill=color + (255,))
+
+            y += line_step
+
+        # Convert RGBA PIL image -> ComfyUI IMAGE tensor (BHWC, float32 0..1)
+        arr = np.array(image).astype(np.float32) / 255.0
+        tensor = torch.from_numpy(arr)[None,]
+        # Mask = inverted alpha channel (1 = transparent background, 0 = text/opaque)
+        mask = 1.0 - torch.from_numpy(arr[..., 3])[None,]
+        return tensor, mask
+
+    @classmethod
+    def IS_CHANGED(cls, text, font_name, font_size, font_color, outline_size, alignment):
+        import hashlib
+        m = hashlib.sha256()
+        m.update(text.encode("utf-8"))
+        m.update(font_name.encode("utf-8"))
+        m.update(str(font_size).encode("utf-8"))
+        m.update(font_color.encode("utf-8"))
+        m.update(str(outline_size).encode("utf-8"))
+        m.update(alignment.encode("utf-8"))
+        return m.digest().hex()
+
+
 # Middleware to handle clipspace file resolution
 @web.middleware
 async def clipspace_resolver_middleware(request, handler):
@@ -1302,6 +1505,18 @@ async def browse_directory(request):
         return web.json_response({'error': str(e)}, status=500)
 
 
+# noinspection PyUnusedLocal
+@PromptServer.instance.routes.get("/noembryo/get_input_directory")
+async def get_input_directory(request):
+    """ Return the ComfyUI input directory path
+    """
+    try:
+        input_dir = folder_paths.get_input_directory()
+        return web.json_response({'input_directory': input_dir})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+
 @PromptServer.instance.routes.get("/noembryo/get_image_preview")
 async def get_image_preview(request):
     """ Get a preview of an image at the given path
@@ -1337,7 +1552,8 @@ async def get_image_preview(request):
 
 @PromptServer.instance.routes.get("/noembryo/serve_image")
 async def serve_image(request):
-    """Serve image file directly"""
+    """ Serve image file directly
+    """
     try:
         image_path = request.query.get('path', '')
 

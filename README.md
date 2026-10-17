@@ -4,10 +4,12 @@
 A diverse set of nodes for ComfyUI.  
 You can access them through "Add node > noEmbryo" submenu.  
 
+
 * [Image nodes](#image-nodes)
     * [Load Image (from path)](#load-image-from-path)
     * [Interactive crop](#interactive-crop)
     * [Image Composer](#image-composer)
+    * [Image from String](#image-from-string)
     * [Image Sharpener](#image-sharpener)
     * [Resolution Scale](#resolution-scale)
 * [MiniMax H3](#minimax-h3)
@@ -21,9 +23,14 @@ You can access them through "Add node > noEmbryo" submenu.
     * [Auto Save Workflow](#auto-save-workflow)
     * [String to Combo](#string-to-combo)
     * [String to INT](#string-to-int)
+  * [Embellishment](#embellishment)
 * [Prompts](#prompts)
     * [Json Prompt Loader](#json-prompt-loader)
     * [PromptTermList 1-6](#prompttermlist-1-6)
+* [Extensions](#extensions)
+    * [Save/Load Menu Extension](#saveload-menu-extension)
+      * [Features](#features)
+      * [Configuring the Workflows Directory](#configuring-the-workflows-directory)
 * [Installation](#installation)
 
 
@@ -88,6 +95,22 @@ Images keep their order and relative pixel sizes (natural sizing, never enlarged
 The preview refreshes instantly when an upstream image, crop, rotation or megapixel cap changes; no workflow run needed.
 
 The inputs are automatically increase, every time you connect a new image loader.
+
+---
+
+### Image from String
+
+![ImageFromString](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/refs/heads/master/stuff/ImageFromString.png)  
+Create an image from a text string.
+
+Renders multiline text onto a transparent-background RGBA image whose canvas size matches the text extent.
+
+- **Controls**
+  - **font_name** - Font to use for rendering.
+  - **font_size** - Font size in pixels.
+  - **font_color** - Font color as a hex value (e.g. #FFFFFF or #FFF).
+  - **outline_size** - Outline thickness in pixels (0 = no outline). Outline color is the inverted font color.
+  - **alignment** - Horizontal text alignment.
 
 ---
 
@@ -256,7 +279,7 @@ A node that "chops" a text using a regular expression and outputs the chopped pa
 ### Auto Save Workflow
 ![AutoSaveWorkflow](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/master/stuff/auto_save_workflow.png)  
 This node can save the current workflow to a `.json` file, every time a generation job is run.
-- **UI controls**
+- **Controls**
   - **save_directory** is the directory where the `.json` file will be saved.  
       It can be a relative path inside the ComfyUI's output directory, or an absolute path of your hard drive.
   - **filename** is the name of the `.json` file.  
@@ -279,6 +302,20 @@ Useful for converting the output of a `Custom Combo` (string) to actual combo va
 
 Another simple conversion of number in text format to an int.
 
+
+
+## Embellishment
+
+![Embellishment](https://raw.githubusercontent.com/noembryo/ComfyUI-noEmbryo/refs/heads/master/stuff/Embellishment.png)  
+Combines a Divider and a Spacer functionality in one node.  
+When height_px is 0, the node acts as a Divider between a Subgraph's widgets.  
+When height_px > 0, the node acts as Spacer.
+
+- **Controls**
+  - **color** - Divider's color in hex (e.g. #ffffff). Only used when `height_px` is 0.
+  - **pick** button - Opens up a color selector dialog to select the divider's color.
+  - **height_px** - Height of the Spacer in pixels. When it is 0, the node acts as a Divider, and when it is >0 the node acts as a Spacer.
+
 ---
 
 # Prompts
@@ -291,7 +328,7 @@ A node that can load a `.json` file with `item:prompt` pairs and outputs the sel
 It can load `.json` files from any directory, not just the node's directory.  
 For the custom text integration, there is a variable (can be specified by the user), that can be used in the item's prompt text to insert the custom text anywhere in the body of the prompt.  
 
-- **UI controls**
+- **Controls**
   
   - **json_path** is the path to the `.json` file.  
       It can be an absolute path of your hard drive, or a relative path to the ComfyUI's installation directory.
@@ -365,6 +402,43 @@ value=
 ```
 
 ---
+# Extensions
+
+### Save/Load Menu Extension
+
+ComfyUI's "new menu > Top" setting removes the legacy sidebar Save/Load buttons that pythongosssss `comfyui-custom-scripts` extended with dropdown menus (saved workflows, save options).  
+This extension restores that functionality by injecting a **Save** and a **Load** button, with dropdowns into ComfyUI's bottom corner (left or right).
+
+It can be used for any custom folder the users wants to save/load their workflows to/from.
+
+By default, the extension is disabled.
+
+#### Features
+
+- 💾 **Save button** dropdown:
+  - `Save As...` — downloads the current workflow as a `.json` file
+  - `Save to Workflows` — saves the workflow to the configured workflows directory
+- 📂 **Load button** dropdown:
+  - `Load from File` — opens a file picker to load a `.json` workflow
+  - `Saved Workflows` — lists workflows from the configured directory and loads the selected one (with folder navigation)
+- **Settings**: Configured via ComfyUI's Settings panel:
+  - **Enable Save/Load Menu buttons** — toggle on/off
+  - **Workflows Directory** — path to the directory containing saved workflows
+  - **Button Position** — choose "Bottom Right" or "Bottom Left"
+- **Safe**: defaults to OFF, wraps all DOM access in try/catch, never modifies existing elements, and cleans up on disable.
+
+#### Configuring the Workflows Directory
+
+By default, the extension looks for saved workflows in ComfyUI's `user/default` directory. To use a different directory:
+
+1. Open ComfyUI Settings → find the "noEmbryo" section
+2. Enable the extension by switching the "Enable Save/Load Menu buttons" ON.
+3. Enter the directory path you want to use in the "Workflows Directory" field
+4. Select at what side the save/load buttons should be placed.
+
+
+
+---
 # Installation
 * Use the ComfyUI Manager
 * Or manually
@@ -373,5 +447,6 @@ value=
   * Restart ComfyUI  
 
 ---
+
 [Python]:https://img.shields.io/badge/Made%20with-Python-1f425f.svg
 [MIT]:https://img.shields.io/badge/License-MIT-green.svg

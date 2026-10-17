@@ -171,13 +171,17 @@ class FileBrowserDialog {
             padding: 12px 15px;
             border-top: 1px solid #444;
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
             gap: 8px;
             background: #333;
         `;
         footer.innerHTML = `
-            <button id="selectFile" style="background: #2a7a2a; border: none; color: white; padding: 6px 16px; cursor: pointer; border-radius: 3px; font-size: 12px;" disabled>Select</button>
-            <button id="cancelBrowser" style="background: #555; border: none; color: white; padding: 6px 16px; cursor: pointer; border-radius: 3px; font-size: 12px;">Cancel</button>
+            <button id="goInputFolder" style="background: #4a4a4a; border: none; color: white; padding: 6px 16px; cursor: pointer; border-radius: 3px; font-size: 12px;">📂 Input Folder</button>
+            <div style="display: flex; gap: 8px;">
+                <button id="selectFile" style="background: #2a7a2a; border: none; color: white; padding: 6px 16px; cursor: pointer; border-radius: 3px; font-size: 12px;" disabled>Select</button>
+                <button id="cancelBrowser" style="background: #555; border: none; color: white; padding: 6px 16px; cursor: pointer; border-radius: 3px; font-size: 12px;">Cancel</button>
+            </div>
         `;
 
         dialog.appendChild(header);
@@ -246,6 +250,21 @@ class FileBrowserDialog {
         };
 
         overlay.querySelector('#selectFile').onclick = selectAndClose;
+
+        // Go to Input Folder button
+        overlay.querySelector('#goInputFolder').onclick = async () => {
+            try {
+                const response = await api.fetchApi('/noembryo/get_input_directory');
+                const data = await response.json();
+                if (data.error) {
+                    alert('Error getting input directory: ' + data.error);
+                    return;
+                }
+                this.loadDirectory(data.input_directory);
+            } catch (e) {
+                alert('Error getting input directory: ' + e.message);
+            }
+        };
 
         // Add the sort change handler
         const sortSelect = overlay.querySelector('#sortMethod');
@@ -829,8 +848,8 @@ app.registerExtension({
                 const src = app.graph._nodes_by_id?.[link.origin_id];
                 if (!src) return null;
 
-                console.log(`[ImageComposer] slot ${slotIdx}: src type=${src.type || "?"} ` +
-                    `widgets=${(src.widgets || []).map(w => w.name).join(",")}`);
+                // console.log(`[ImageComposer] slot ${slotIdx}: src type=${src.type || "?"} ` +
+                //     `widgets=${(src.widgets || []).map(w => w.name).join(",")}`);
 
                 // Direct connection: LoadImageFromPathEnhanced
                 const result = icExtractFromNode(src);
@@ -842,13 +861,13 @@ app.registerExtension({
                 // Intermediate nodes (e.g. KJ Set/Get): trace back
                 const traced = icTraceBack(src);
                 if (traced) {
-                    console.log(`[ImageComposer] slot ${slotIdx}: traced path=${traced.path}`);
+                    // console.log(`[ImageComposer] slot ${slotIdx}: traced path=${traced.path}`);
                 } else {
-                    console.log(`[ImageComposer] slot ${slotIdx}: no trace result, ` +
-                        `checking widgets for paths...`);
+                    // console.log(`[ImageComposer] slot ${slotIdx}: no trace result, ` +
+                    //     `checking widgets for paths...`);
                     const fallbackPath = icFindPathInWidgets(src);
                     if (fallbackPath) {
-                        console.log(`[ImageComposer] slot ${slotIdx}: fallback path=${fallbackPath}`);
+                        // console.log(`[ImageComposer] slot ${slotIdx}: fallback path=${fallbackPath}`);
                         return { path: fallbackPath, rotation: 0, crop: null, maxMp: 0,
                                  srcNode: src };
                     }
