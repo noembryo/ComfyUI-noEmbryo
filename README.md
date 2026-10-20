@@ -425,7 +425,16 @@ By default, the extension is disabled.
   - **Enable Save/Load Menu buttons** — toggle on/off
   - **Workflows Directory** — path to the directory containing saved workflows
   - **Button Position** — choose "Bottom Right" or "Bottom Left"
+- **Corner placement**: the buttons are placed flush in the selected bottom corner. ComfyUI's own
+  toolbars are moved out of the way to make room for them:
+  - *Bottom Left* — the vertical toolbox on the left edge is nudged up (and shortened if needed),
+    so the buttons can sit underneath it.
+  - *Bottom Right* — the horizontal action bar (zoom, fit, select…) is shifted to the left by
+    exactly as much as needed, so the buttons can sit next to it in the corner with a small gap.
+  - The original layout is restored automatically when the extension is switched off or the
+    position is changed.
 - **Safe**: defaults to OFF, wraps all DOM access in try/catch, never modifies existing elements, and cleans up on disable.
+  The graph canvas and the node widget overlays are never moved.
 
 #### Configuring the Workflows Directory
 

@@ -40,6 +40,7 @@ def _list_directory_contents(dir_path):
         return {"dirs": [], "files": [], "dir": dir_path or ""}
     dirs = []
     files = []
+    # noinspection PyBroadException
     try:
         for fname in os.listdir(dir_path):
             fpath = join(dir_path, fname)
@@ -115,14 +116,22 @@ async def save_workflow(request):
         wf_dir = _resolve_dir(wf_dir, rel_path) or _DEFAULT_WORKFLOWS_DIR
         if not name or workflow is None:
             return web.json_response({"error": "Missing name or workflow"})
+        # Use _safe_workflow_path to sanitize just the filename part
         fpath = _safe_workflow_path(name, wf_dir)
         if fpath is None:
             return web.json_response({"error": "Invalid workflow name or directory"})
+        # Check if file already exists (unless overwrite is requested)
+        overwrite = data.get("overwrite", False)
+        if isfile(fpath) and not overwrite:
+            return web.json_response({"error": "file_exists", "path": fpath, "name": name})
+        # Create the full directory path including subdirectories
+        # noinspection PyBroadException
         try:
-            os.makedirs(wf_dir, exist_ok=True)
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
         except Exception:
             pass
         with io.open(fpath, "w", encoding="utf-8") as f:
+            # noinspection PyTypeChecker
             json.dump(workflow, f, ensure_ascii=False, indent=2)
         return web.json_response({"ok": True, "path": fpath, "name": name, "dir": wf_dir})
     except Exception as e:

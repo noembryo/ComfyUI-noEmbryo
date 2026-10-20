@@ -17,11 +17,13 @@ const EXTENSION_NAME = "Comfy.noEmbryo.SaveLoadMenu";
 const STORAGE_KEY_ENABLED = "noEmbryo_save_load_menu_enabled";
 const STORAGE_KEY_DIR = "noEmbryo_save_load_menu_dir";
 const STORAGE_KEY_POS = "noEmbryo_save_load_menu_pos";
+const STORAGE_KEY_LAST_NAME = "noEmbryo_save_load_menu_last_name";
 
 // Default: OFF
 let enabled = false;
 let workflowsDir = "";
 let buttonPosition = "bottom-right"; // "bottom-left" or "bottom-right"
+let lastWorkflowName = "";
 
 // Current navigation state for recursive browsing
 let currentRelPath = "";
@@ -63,6 +65,9 @@ function readSettings() {
         const rawPos = localStorage.getItem(STORAGE_KEY_POS);
         buttonPosition = rawPos || "bottom-right";
 
+        const rawLastName = localStorage.getItem(STORAGE_KEY_LAST_NAME);
+        lastWorkflowName = rawLastName || "";
+
         log("Settings loaded: enabled=" + enabled + ", dir=" + workflowsDir + ", pos=" + buttonPosition);
     } catch (e) {
         warn("Failed to read settings: " + e.message);
@@ -87,19 +92,20 @@ function createButton(icon, title) {
     btn.textContent = icon;
     btn.title = title;
     btn.style.cssText = `
+        box-sizing: border-box;
         background: #333;
         color: #eee;
         border: 1px solid #555;
         border-radius: 4px;
-        padding: 6px 8px;
+        padding: 0;
         font-size: 14px;
         cursor: pointer;
         font-family: inherit;
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 36px;
-        height: 36px;
+        width: ${BUTTON_SIZE}px;
+        height: ${BUTTON_SIZE}px;
         margin: 0;
         z-index: 99999;
         position: fixed;
@@ -272,20 +278,54 @@ async function saveWorkflowToWorkflows() {
             warn("No workflow data available");
             return;
         }
-        const name = prompt("Enter workflow name:", "workflow_" + new Date().toISOString().slice(0,16).replace(/:/g,"-"));
+        const defaultName = lastWorkflowName || "workflow_" + new Date().toISOString().slice(0,16).replace(/:/g,"-");
+        const name = prompt("Enter workflow name:", defaultName);
         if (!name) return;
-        log("Saving workflow to dir: " + workflowsDir);
+        
+        // Split name into directory path and filename
+        const lastSlash = name.lastIndexOf("/");
+        const lastBackslash = name.lastIndexOf("\\");
+        const lastSep = Math.max(lastSlash, lastBackslash);
+        let relPath = "";
+        let fileName = name;
+        if (lastSep >= 0) {
+            relPath = name.substring(0, lastSep);
+            fileName = name.substring(lastSep + 1);
+        }
+        
+        log("Saving workflow to dir: " + workflowsDir + ", relPath: " + relPath + ", name: " + fileName);
         const response = await fetch("/noembryo/save_workflow", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: name, workflow: workflow, dir: workflowsDir }),
+            body: JSON.stringify({ name: fileName, workflow: workflow, path: relPath, dir: workflowsDir }),
         });
         const result = await response.json();
         log("Save response: " + JSON.stringify(result).substring(0, 200));
         if (result.error) {
-            warn("Save failed: " + result.error);
+            if (result.error === "file_exists") {
+                const confirmOverwrite = confirm("Workflow '" + result.name + "' already exists. Overwrite?");
+                if (confirmOverwrite) {
+                    // Retry with overwrite flag
+                    const response2 = await fetch("/noembryo/save_workflow", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name: fileName, workflow: workflow, path: relPath, dir: workflowsDir, overwrite: true }),
+                    });
+                    const result2 = await response2.json();
+                    if (result2.error) {
+                        warn("Save failed: " + result2.error);
+                    } else {
+                        log("Workflow saved: " + result2.path);
+                        writeSetting(STORAGE_KEY_LAST_NAME, name);
+                    }
+                }
+            } else {
+                warn("Save failed: " + result.error);
+            }
         } else {
             log("Workflow saved: " + result.path);
+            // Save the name for next time
+            writeSetting(STORAGE_KEY_LAST_NAME, name);
         }
     } catch (e) {
         error("Failed to save workflow to default", e);
@@ -505,6 +545,360 @@ async function buildLoadDropdown() {
 }
 
 // ---------------------------------------------------------------------------
+// Adjust ComfyUI's native toolbars to make room for our buttons
+//
+//  * New "Top" menu renders a vertical toolbox on the left edge
+//    (<nav class="side-tool-bar-container">) and a horizontal action bar
+//    in the bottom right corner (<span class="p-buttongroup right-0 bottom-0">).
+//  * We make room for the Save/Load buttons by moving the relevant native
+//    toolbar instead of moving our buttons away from the corner.
+// ---------------------------------------------------------------------------
+
+// Our buttons are 36x36 and stacked with a 4px gap -> 76px tall, 36px wide
+const BUTTON_SIZE = 36;
+const BUTTON_GAP = 4;
+const BUTTONS_HEIGHT = BUTTON_SIZE * 2 + BUTTON_GAP + 8;  // 80px
+const BUTTONS_WIDTH = BUTTON_SIZE + 4;                    // 40px
+
+// The element we shifted last, so we can restore it if ComfyUI replaces it
+let shiftedRightToolbar = null;
+
+// Never move the graph canvas, a node widget overlay or anything that
+// contains the canvas - shifting those would move the whole workflow (or the
+// text boxes of a single node) and would not be restored by ComfyUI.
+function isGraphElement(el) {
+    if (!el) return true;
+    if (el.tagName === "CANVAS") return true;
+    if (el.id === "graph-canvas") return true;
+    try {
+        if (el.closest && el.closest(".dom-widget")) return true;
+        const canvas = document.getElementById("graph-canvas");
+        if (canvas && el.contains && el.contains(canvas)) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+}
+
+// Find the vertical toolbox of the new menu (left edge)
+function findLeftToolbar() {
+    const nav = document.querySelector("nav.side-tool-bar-container");
+    if (nav) return nav;
+
+    // Fallback: the tallest <nav> hugging the left edge (the new menu renders
+    // the toolbox as a <nav>). Restricting it to <nav> keeps us from touching
+    // unrelated panels (e.g. the legacy queue menu).
+    const vh = window.innerHeight;
+    let best = null;
+    let bestH = 0;
+    document.querySelectorAll("nav").forEach((e) => {
+        const r = e.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;
+        if (r.left > 80 || r.width > 140) return;
+        if (r.height < vh * 0.4) return;
+        if (r.height > bestH) {
+            bestH = r.height;
+            best = e;
+        }
+    });
+    return best;
+}
+
+// Find the horizontal action bar of the new menu (bottom right corner)
+function findRightToolbar() {
+    // Preferred: the PrimeVue button group anchored to the bottom right
+    const group = document.querySelector("span.p-buttongroup.right-0.bottom-0")
+        || document.querySelector(".p-buttongroup.right-0.bottom-0");
+    if (group && !isGraphElement(group)) return group;
+
+    // Fallback: a small horizontal overlay sitting in the bottom right corner.
+    // Only elements that are stacked above the canvas (high z-index) qualify,
+    // so the graph canvas and the node widget overlays can never be picked.
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let best = null;
+    let bestScore = -Infinity;
+    document.querySelectorAll("body *").forEach((e) => {
+        if (e === saveBtn || e === loadBtn) return;
+        if (isGraphElement(e)) return;
+        const cs = getComputedStyle(e);
+        if (cs.position !== "absolute" && cs.position !== "fixed") return;
+        if ((parseInt(cs.zIndex) || 0) < 100) return;   // must be an overlay
+        const r = e.getBoundingClientRect();
+        if (r.width < 60 || r.width > 400) return;   // small toolbar only
+        if (r.height < 20 || r.height > 120) return;
+        if (r.width <= r.height) return;             // must be horizontal
+        if (r.right < vw - 120 || r.bottom < vh - 120) return; // near the corner
+        // Prefer the element closest to the corner
+        const score = (r.right + r.bottom);
+        if (score > bestScore) {
+            bestScore = score;
+            best = e;
+        }
+    });
+    return best;
+}
+
+// Shift an element, remembering its original inline translate so we can
+// restore it later. We use the standalone `translate` property (instead of
+// `transform`) so ComfyUI's own transforms keep working.
+function shiftElement(el, axis, pixels) {
+    if (!el || isGraphElement(el)) return;
+    if (el.dataset.noEmbryoOrigTranslate === undefined) {
+        el.dataset.noEmbryoOrigTranslate = el.style.translate || "";
+    }
+    const value = axis === "x" ? (-pixels) + "px 0px" : "0px " + (-pixels) + "px";
+    if (el.style.translate !== value) {
+        el.style.translate = value;
+    }
+}
+
+function unshiftElement(el) {
+    if (!el) return;
+    if (el.dataset.noEmbryoOrigTranslate === undefined) return;
+    const original = el.dataset.noEmbryoOrigTranslate;
+    if (el.style.translate !== original) {
+        el.style.translate = original;
+    }
+    delete el.dataset.noEmbryoOrigTranslate;
+}
+
+// Make room under the vertical toolbox so our buttons can sit at the bottom
+// left corner without covering it.
+function adjustLeftToolbar() {
+    const nav = findLeftToolbar();
+    if (!nav) return;
+
+    // The scrollable list inside the toolbox is shortened so the toolbar can
+    // never extend into the area used by our buttons.
+    const inner = nav.querySelector("div.side-tool-bar-container") || nav;
+    const maxH = "calc(100% - " + BUTTONS_HEIGHT + "px)";
+    if (inner.style.maxHeight !== maxH) {
+        inner.style.maxHeight = maxH;
+    }
+
+    // Nudge the toolbox up a little, but never off the top of the screen.
+    const current = parseFloat(nav.dataset.noEmbryoShiftY || "0") || 0;
+    const rect = nav.getBoundingClientRect();
+    const room = Math.max(0, rect.top + current - 4); // undo our own offset
+    const shift = Math.min(BUTTONS_HEIGHT, room);
+    if (shift !== current) {
+        nav.dataset.noEmbryoShiftY = String(shift);
+        if (shift > 0) {
+            shiftElement(nav, "y", shift);
+        } else {
+            unshiftElement(nav);
+        }
+    }
+}
+
+// Move the horizontal action bar of the bottom right corner to the left so
+// our buttons can sit in the corner. Only as much as needed is moved, so the
+// gap between the toolbar and the buttons stays as small as possible.
+function adjustRightToolbar() {
+    const bar = findRightToolbar();
+    if (!bar) return;
+
+    // Restore a previously shifted element if it is not the current one
+    if (shiftedRightToolbar && shiftedRightToolbar !== bar) {
+        unshiftElement(shiftedRightToolbar);
+    }
+    shiftedRightToolbar = bar;
+
+    if (!saveBtn || !saveBtn.parentElement) {
+        unshiftElement(bar);
+        return;
+    }
+
+    const current = parseFloat(bar.dataset.noEmbryoShiftX || "0") || 0;
+    const barRect = bar.getBoundingClientRect();
+    const buttonRect = saveBtn.getBoundingClientRect();
+    // Right edge of the bar without our own offset
+    const baseRight = barRect.right + current;
+    // The toolbar has its own padding, so the last icon sits further left
+    const padRight = parseFloat(getComputedStyle(bar).paddingRight) || 0;
+
+    let needed = 0;
+    if (baseRight > buttonRect.left) {
+        needed = Math.min(BUTTONS_WIDTH, baseRight - buttonRect.left + 4 - padRight);
+        if (needed < 0) needed = 0;
+    }
+
+    if (needed !== current) {
+        bar.dataset.noEmbryoShiftX = String(needed);
+        if (needed > 0) {
+            shiftElement(bar, "x", needed);
+        } else {
+            unshiftElement(bar);
+            delete bar.dataset.noEmbryoShiftX;
+        }
+    }
+}
+
+function restoreNativeToolbars() {
+    try {
+        const nav = findLeftToolbar();
+        if (nav) {
+            const inner = nav.querySelector("div.side-tool-bar-container") || nav;
+            inner.style.maxHeight = "";
+            delete nav.dataset.noEmbryoShiftY;
+            unshiftElement(nav);
+        }
+        if (shiftedRightToolbar) {
+            unshiftElement(shiftedRightToolbar);
+            delete shiftedRightToolbar.dataset.noEmbryoShiftX;
+            shiftedRightToolbar = null;
+        }
+    } catch (e) {
+        warn("restoreNativeToolbars error: " + e.message);
+    }
+}
+
+function adjustNativeToolbars() {
+    try {
+        if (buttonPosition === "bottom-left") {
+            adjustLeftToolbar();
+            if (shiftedRightToolbar) {
+                unshiftElement(shiftedRightToolbar);
+                delete shiftedRightToolbar.dataset.noEmbryoShiftX;
+                shiftedRightToolbar = null;
+            }
+        } else {
+            adjustRightToolbar();
+            const nav = findLeftToolbar();
+            if (nav) {
+                const inner = nav.querySelector("div.side-tool-bar-container") || nav;
+                inner.style.maxHeight = "";
+                delete nav.dataset.noEmbryoShiftY;
+                unshiftElement(nav);
+            }
+        }
+    } catch (e) {
+        warn("adjustNativeToolbars error: " + e.message);
+    }
+}
+
+// Re-apply the shift when ComfyUI re-creates its toolbars (e.g. when the
+// menu mode is switched or the layout is re-rendered).
+let toolbarObserver = null;
+let toolbarFrame = null;
+
+function observeToolbars() {
+    if (toolbarObserver) return;
+    try {
+        toolbarObserver = new MutationObserver((mutations) => {
+            if (!enabled) return;
+
+            // Only react on structural changes or when somebody overwrites the
+            // style of the element we shifted. Reacting on every attribute
+            // change would fire on every mouse move.
+            let relevant = false;
+            for (const m of mutations) {
+                if (m.type === "childList") {
+                    relevant = true;
+                    break;
+                }
+                if (m.type === "attributes"
+                    && m.attributeName === "style"
+                    && m.target === shiftedRightToolbar) {
+                    relevant = true;
+                    break;
+                }
+            }
+            if (!relevant || toolbarFrame) return;
+
+            toolbarFrame = requestAnimationFrame(() => {
+                toolbarFrame = null;
+                if (enabled) adjustNativeToolbars();
+            });
+        });
+        toolbarObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
+    } catch (e) {
+        warn("Failed to observe toolbars: " + e.message);
+    }
+}
+
+// Remove a stale offset that an earlier version of this extension may have
+// left on the graph canvas (ComfyUI itself never sets an inline translate
+// there).
+function cleanupCanvasShift() {
+    try {
+        const canvas = document.getElementById("graph-canvas");
+        if (canvas && canvas.style && canvas.style.translate) {
+            canvas.style.translate = "";
+        }
+    } catch (e) {
+        warn("cleanupCanvasShift error: " + e.message);
+    }
+}
+
+function stopObservingToolbars() {
+    if (toolbarObserver) {
+        try { toolbarObserver.disconnect(); } catch (e) { /* ignore */ }
+        toolbarObserver = null;
+    }
+    if (toolbarFrame) {
+        cancelAnimationFrame(toolbarFrame);
+        toolbarFrame = null;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic helper (only active with ?noembryoDebug=1 in the URL).
+// Logs the geometry of every fixed/absolute element near the bottom corners
+// so the native toolbars can be identified reliably.
+// ---------------------------------------------------------------------------
+
+function debugScanToolbars() {
+    try {
+        if (!/[?&]noembryoDebug=1/.test(window.location.search)) return;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const clsOf = (el) => {
+            try {
+                return (typeof el.className === "string" ? el.className : (el.className.baseVal || "")).slice(0, 140);
+            } catch (e) { return ""; }
+        };
+
+        // 1) fixed/absolute elements near the bottom corners
+        const out = [];
+        document.querySelectorAll("body *").forEach((el) => {
+            const cs = getComputedStyle(el);
+            if (cs.position !== "fixed" && cs.position !== "absolute") return;
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return;
+            if (r.bottom < vh - 260) return;
+            if (r.left > 320 && r.right < vw - 320) return;
+            out.push({
+                tag: el.tagName, cls: clsOf(el), id: el.id || "",
+                rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+                pos: cs.position, top: cs.top, right: cs.right, bottom: cs.bottom, left: cs.left,
+                transform: cs.transform, kids: el.children.length
+            });
+        });
+        console.log("[noEmbryoDebug] bottom candidates: " + JSON.stringify(out));
+
+        // 2) anything tall & narrow in the left column (the toolbox), any position
+        const left = [];
+        document.querySelectorAll("body *").forEach((el) => {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return;
+            if (r.left > 70 || r.right < 0) return;         // left column
+            if (r.height < 80) return;                       // tall elements only
+            const cs = getComputedStyle(el);
+            left.push({
+                tag: el.tagName, cls: clsOf(el), id: el.id || "",
+                rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+                pos: cs.position, display: cs.display, flexDirection: cs.flexDirection,
+                transform: cs.transform, kids: el.children.length,
+                parent: el.parentElement ? el.parentElement.tagName + "." + clsOf(el.parentElement).slice(0, 80) : ""
+            });
+        });
+        console.log("[noEmbryoDebug] left column: " + JSON.stringify(left));
+    } catch (e) {
+        warn("debugScanToolbars error: " + e.message);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Inject buttons into bottom corner
 // ---------------------------------------------------------------------------
 
@@ -566,7 +960,7 @@ function injectButtons() {
             document.body.appendChild(loadBtn);
         }
 
-        const bottom = 10;
+        const bottom = 0;
         if (isBottomRight) {
             saveBtn.style.right = "0px";
             saveBtn.style.left = "auto";
@@ -578,10 +972,21 @@ function injectButtons() {
             loadBtn.style.left = "0px";
             loadBtn.style.right = "auto";
         }
+        // Save on top, Load at the very bottom of the corner
         saveBtn.style.top = "auto";
-        saveBtn.style.bottom = bottom + "px";
+        saveBtn.style.bottom = (bottom + BUTTON_SIZE + BUTTON_GAP) + "px";
         loadBtn.style.top = "auto";
-        loadBtn.style.bottom = (bottom + 40) + "px";
+        loadBtn.style.bottom = bottom + "px";
+
+        // Adjust ComfyUI's native toolbars to make room for our buttons.
+        //  - Left toolbar (vertical): move UP so the buttons can go under it.
+        //  - Right toolbar (horizontal): move LEFT so the buttons can go beside it.
+        try {
+            adjustNativeToolbars();
+            observeToolbars();
+        } catch (e) {
+            warn("Failed to adjust native toolbars: " + e.message);
+        }
 
         log("Save/Load buttons injected at bottom-" + buttonPosition);
     } catch (e) {
@@ -592,6 +997,8 @@ function injectButtons() {
 function removeButtons() {
     try {
         closeAllDropdowns();
+        stopObservingToolbars();
+        restoreNativeToolbars();
         if (saveBtn && saveBtn.parentElement) {
             saveBtn.parentElement.removeChild(saveBtn);
         }
@@ -636,6 +1043,7 @@ app.registerExtension({
 
     init() {
         log("Extension init called");
+        cleanupCanvasShift();
         readSettings();
         log("Save/Load menu enabled: " + enabled + ", dir: " + workflowsDir + ", pos: " + buttonPosition);
 
@@ -650,6 +1058,7 @@ app.registerExtension({
                     { value: "bottom-left", text: "Bottom Left", selected: value === "bottom-left" },
                 ],
                 onChange: (value) => {
+                    if (value === undefined || value === null) return;
                     buttonPosition = value;
                     writeSetting(STORAGE_KEY_POS, buttonPosition);
                     log("Settings: position=" + buttonPosition);
@@ -666,6 +1075,7 @@ app.registerExtension({
                 defaultValue: "",
                 type: "string",
                 onChange: (value) => {
+                    if (value === undefined || value === null) return;
                     workflowsDir = value;
                     writeSetting(STORAGE_KEY_DIR, workflowsDir);
                     log("Settings: dir=" + workflowsDir);
@@ -678,6 +1088,7 @@ app.registerExtension({
                 defaultValue: false,
                 type: "boolean",
                 onChange: (value) => {
+                    if (value === undefined || value === null) return;
                     enabled = value;
                     writeSetting(STORAGE_KEY_ENABLED, enabled);
                     log("Settings: enabled=" + enabled);
@@ -698,6 +1109,8 @@ app.registerExtension({
             setTimeout(() => { if (enabled) injectButtons(); }, 2000);
             setTimeout(() => { if (enabled) injectButtons(); }, 5000);
         }
+
+        setTimeout(() => debugScanToolbars(), 3000);
     },
 
     beforeRegisterNodeDef() {

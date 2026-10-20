@@ -13,14 +13,14 @@ from .minimax import (H3MotionContextClipStitcher, H3ClipRefiner,
                       H3MotionContextClipPurge, H3AVLatentFromVideo)
 
 MANIFEST = {"name": "noEmbryo Nodes",
-            "version": (1, 9, 5),
+            "version": (1, 9, 6),
             "author": "noEmbryo",
             "project": "https://github.com/noembryo/ComfyUI-noEmbryo",
             "description": "Nodes for ComfyUI",
             "license": "MIT",
             }
 __author__ = "noEmbryo"
-__version__ = "1.9.5"
+__version__ = "1.9.6"
 
 LISTS_PATH = join(dirname(realpath(__file__)), "TermLists")
 
@@ -530,7 +530,7 @@ class EmbellishmentNode:
                    " When height_px is 0, acts as Divider.\n"
                    " When height_px > 0, acts as Spacer.")
 
-    # noinspection PyMethodMayBeStatic
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def out(self, decorator=None):
         return ()
 
